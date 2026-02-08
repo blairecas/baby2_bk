@@ -1,0 +1,683 @@
+	.title	BABY2
+	.enabl	LC,AMA
+	
+	.asect
+	.=1000
+
+
+C_RAM_BANKS54	=: ^B0001110000000000
+
+C_VADDR		=: 40000
+C_SCRWID	=: 100
+
+C_WINDOW_Y1	=: 03.*16.
+C_WINDOW_Y2	=: 07.*16.
+C_WINDOW_Y3	=: 11.*16.
+
+C_MAX_BABY_X	=: 256.-20.*400
+C_FLO_BABY_Y	=: 208.*400
+C_TRA_BABY_Y	=: 202.*400
+
+C_TRASH_X	=: 13.*16.
+C_TRASH_Y	=: 12.*16.
+
+C_SPR_BABY1	=: 00.
+C_SPR_WINDOW	=: 29.
+
+C_BABY_COUNT	=: 3
+
+C_BABY_AI	=: 00
+C_BABY_AIPAR	=: 02
+C_BABY_SPRITE 	=: 04
+C_BABY_X	=: 06
+C_BABY_Y	=: 10
+C_BABY_DX	=: 12
+C_BABY_DY	=: 14
+C_BABY_LEN	=: 16				; (!) in bytes
+
+C_AI_NONE	=: 0
+C_AI_WALKOUT	=: 1
+C_AI_JUMP	=: 2
+C_AI_FALL	=: 3
+
+
+Start:	mov	#1000, SP
+	mtps	#200
+	; backup ints
+	mov	@#4, -(SP)
+	mov	@#6, -(SP)
+	mov	@#60, -(SP)
+	mov	@#62, -(SP)
+	mov	@#100, -(SP)
+	mov	@#102, -(SP)
+	mov	@#274, -(SP)
+	mov	@#276, -(SP)
+	mov	SP, Stop+2
+	; set stop
+	mov	#Stop, @#4
+	mov	#200, @#6
+	; check for BK 0011(M)
+	clr	@#100				; use this addr as flag for BK 0010
+	cmpb	@#177717, #300
+	bne	10$
+	mov	#C_RAM_BANKS54, @#177716	; banks 5 4 (andos standard bank 4 on 100000)
+	clrb	@#177663			; vsync on, screen buf 5, palette 0
+	mov	#VsyInt, @#100
+	mov	#200, @#102
+	mov	#1200, TimerCycle
+	mov	#2, TimerLine
+10$:	; keyboard interrupts
+	mov	#KbdInt, @#60
+	clr	@#62
+	mov	#Kbd274, @#274
+	clr	@#276
+	bic	#^B01000000, @#177660		; allow keyboard interrupt
+	; set timer to screen refresh length
+TimerCycle =: .+2
+	mov	#740, @#177706
+	mov	#20, @#177712			; start timer, max speed
+
+;	; set joystick bad bits
+;	clr	@#177714			; turn off mouse?
+;	clr	JoyBadBits
+;	clr	R0
+;	bis	@#177714, JoyBadBits
+;	sob	R0, .-6
+
+Stop:	; stop key goes here 
+	; (!) mutable SP addr
+	mov	#1000, SP
+	mov	#200, @#177716			; speaker DC to low (not high?)
+	; clear ram to 100000
+	mov	#End, R0
+	clr	(R0)+
+	tst	R0
+	bpl	.-4
+	; roll screen  to 0
+	mov	#1330, @#177664
+	; all is set then
+	mtps	#0
+	; wait a bit, then finish init
+	clr	R0
+	sob	R0, .
+	tst	@#177662			; read keyboard reg just in case
+	; go to main game cycle
+	clr	CurrentMode
+	br	MainCycle
+
+
+; exit to somewhere
+Exit:	call	FadeScreen
+	mov	#1330, @#177664
+	; restore ints
+	mtps	#200
+	tst	@#100
+	beq	10$
+	movb	#^B01000000, @#177663
+10$:	mov	#1000, SP
+	mov	-(SP), @#4
+	mov	-(SP), @#6
+	mov	-(SP), @#60
+	mov	-(SP), @#62
+	mov	-(SP), @#100
+	mov	-(SP), @#102
+	mov	-(SP), @#274
+	mov	-(SP), @#276
+	mov	#100004, R0			; check 'standard' ROM at 100000
+	mov	-(R0), R1
+	add	-(R0), R1
+	cmp	R1, #167+254
+	beq	99$				; seems we have it
+	mov	@#177716, R0			; else go to reset addr
+	clrb	R0
+99$:	jmp	(R0)
+
+
+; //////////////////////////////////////////////////////////////////////////////
+; // Game phases
+; //////////////////////////////////////////////////////////////////////////////
+
+; main game cycle
+MainCycle:
+	call	VSyncWait			; vsync wait cycle
+CurrentMode =: .+2
+	mov	#000000, R0
+	asl	R0
+	call	@MainCycleTbl(R0)		; run procedures
+	br	MainCycle
+
+MainCycleTbl:	.word	MainMenuInit, MainMenu, MainInit, MainGame
+
+
+; initialize main menu
+MainMenuInit:
+	call	FadeScreen
+	inc	CurrentMode
+	return
+
+
+; main menu
+MainMenu:
+	inc	CurrentMode
+	return
+
+
+; initialize game
+MainInit:
+	call	FadeScreen
+	call	BabiesClear
+	call	DrawBackground
+	inc	CurrentMode
+	return
+
+
+; main game cycle
+MainGame:
+	call	BabyPrepare
+	call	BabyDraw
+	call	BabyProcess
+	return
+
+
+; background prepare
+DrawBackground:
+	mov	#BgrData, R5
+	clr	R2
+	mov	#16., R3
+10$:	mov	#16., R4
+	clr	R1
+20$:	movb	(R5)+, R0
+	call	DrawTile
+	add	#16., R1
+	sob	R4, 20$
+	add	#16., R2
+	sob	R3, 10$
+	return
+
+
+; //////////////////////////////////////////////////////////////////////////////
+; // Baby logic
+; //////////////////////////////////////////////////////////////////////////////
+
+; just clear babies array
+BabiesClear:
+	mov	#Babies, R0
+	mov	#C_BABY_COUNT*C_BABY_LEN/2, R1
+	clr	(R0)+
+	sob	R1, .-2
+	return
+
+
+; prepare another baby (set as walking out of window)
+BabyPrepare:
+	; wait timer
+BabyTimer =: .+2
+	dec	#000000
+	bgt	99$
+	call	Lfsr8
+	add	#100, R0
+	mov	R0, BabyTimer
+	; get an empty one and prepare it
+	mov	#Babies, R5
+	tst	(R5)
+	beq	10$
+	add	#C_BABY_LEN, R5
+	tst	(R5)
+	beq	10$
+	add	#C_BABY_LEN, R5
+	tst	(R5)
+	beq	10$
+	return
+10$:	; set baby as walking out
+	mov	#C_AI_WALKOUT, (R5)+		; 000 - set baby AI mode
+	clr	(R5)+				; 002 - reserved AI parameter
+	; sprite
+	mov	#C_SPR_BABY1, (R5)+		; 004 - set sprite
+	; coords - x
+	mov	#0.*400, (R5)+			; 006 - set X (float)
+	; coords - y
+	call	Random
+	mov	R0, R1
+	bic	#^B1111111111111100, R1
+	movb	BabiesYTbl(R1), R2		; (!) can be negative
+LastWindowY =: .+2
+	cmp	R2, #000000			; do not exit from one window (Y-coord) twice
+	bne	20$
+	inc	R1
+	bic	#^B1111111111111100, R1
+	movb	BabiesYTbl(R1), R2
+20$:	mov	R2, LastWindowY
+	swab	R2
+	clrb	R2				; to float
+	mov	R2, (R5)+			; 010 - set Y (float)
+	; dx 
+	bic	#^B1000000011111111, R0		; (!) already random in R0
+	swab	R0
+	add	#120, R0
+	mov	R0, (R5)+			; 012 - set DX (float)
+	; dy - randomly but must depend on starting Y and around of 2.0
+	call	Random
+	bic	#^B1111111110000000, R0
+	add	#1*400+200, R0
+	mov	R0, (R5)+			; 014 - set DY
+99$:	return
+
+
+; draw babies
+BabyDraw:
+	mov	#Babies, R5
+	call	100$
+	add	#C_BABY_LEN, R5
+	call	100$
+	add	#C_BABY_LEN, R5
+100$:	; do we need to draw at all?
+	tst	(R5)
+	beq	199$
+	; draw one baby, R5 - it's data addr
+	mov	R5, -(SP)
+	add	#C_BABY_SPRITE, R5
+	mov	(R5)+, R0			; spr
+	mov	(R5)+, R1			; x
+	clrb	R1
+	swab	R1				; float to int
+	mov	(R5)+, R2			; y
+	clrb	R2
+	swab	R2				; float to int
+	call	DrawBaby
+	mov	(SP)+, R5
+199$:	return
+
+
+; process babies
+BabyProcess:
+	mov	#Babies, R5
+	call	100$
+	add	#C_BABY_LEN, R5
+	call	100$
+	add	#C_BABY_LEN, R5
+100$:	mov	(R5), R0
+	asl	R0
+	jmp	@BabyProcTbl(R0)
+
+BabyProcTbl:	.word	RetAdr, BabyWalkout, BabyJump, BabyFall
+
+
+; slow walk out of window
+BabyWalkout:
+	add	#32., C_BABY_X(R5)
+	cmp	C_BABY_X(R5), #32.*400
+	blt	99$				; (!) not BLO here
+	mov	#C_AI_JUMP, (R5)		; set new AI to jump
+	clr	C_BABY_AIPAR(R5)		; clear AI parameter
+99$:	return
+
+
+; baby jumping
+BabyJump:
+	mov	C_BABY_DY(R5), R0
+	call	Min4R0toR1
+	sub	R1, C_BABY_Y(R5)
+	; do not fly over screen
+	cmp	C_BABY_Y(R5), #6*400
+	bhis	10$
+	mov	#6*400, C_BABY_Y(R5)
+10$:	mov	R0, R1
+	clr	R2				; DY -> [R2 R1]
+	call	Mul16R2R1
+	sub	R0, R1
+	sbc	R2				; [R2 R1] * 15
+	call	Div16R2R1			; [R2 R1] / 16
+	mov	R1, C_BABY_DY(R5)
+	; check if at top
+	cmp	R1, #32.
+	bhi	BabyRight
+	; then switch to fall
+	mov	#C_AI_FALL, (R5)
+
+
+; baby going right
+BabyRight:
+	mov	#C_MAX_BABY_X, R0
+	sub	C_BABY_X(R5), R0
+	clc
+	ror	R0
+	asr	R0
+	asr	R0
+	asr	R0
+	asr	R0
+	cmp	R0, C_BABY_DX(R5)
+	bhis	10$
+	mov	R0, C_BABY_DX(R5)
+10$:	add	C_BABY_DX(R5), C_BABY_X(R5)
+	; is it in a trash?
+	cmp	C_BABY_Y(R5), #C_TRA_BABY_Y
+	blo	99$
+	mov	#C_MAX_BABY_X, R0
+	sub	C_BABY_X(R5), R0
+	cmp	R0, #32.*400
+	bhi	99$
+	; it is
+	clr	(R5)				; clear AI
+	clr	C_BABY_AIPAR(R5)		; clear AI parameter
+99$:	return
+
+
+; baby falling
+BabyFall:
+	mov	C_BABY_DY(R5), R0
+	call	Min4R0toR1
+	add	R1, C_BABY_Y(R5)
+	mov	R0, R1
+	clr	R2				; DY -> [R2 R1]
+	call	Mul16R2R1
+	add	R0, R1
+	adc	R2				; [R2 R1] * 17
+	call	Div16R2R1			; [R2 R1] / 16
+	mov	R1, C_BABY_DY(R5)
+	; check if at bottom
+	cmp	C_BABY_Y(R5), #C_FLO_BABY_Y
+	blo	BabyRight
+	; stick to bottom and switch to jump
+	mov	#C_FLO_BABY_Y, C_BABY_Y(R5)
+	mov	#C_AI_JUMP, (R5)
+	; decrease velocity if it's way too much
+	mov	C_BABY_DY(R5), R0
+	cmp	R0, #12.*400
+	blo	BabyRight
+	mov	R0, R1
+	add	R0, R1
+	add	R0, R1
+	asr	R1
+	asr	R1
+	mov	R1, C_BABY_DY(R5)
+	br	BabyRight
+
+
+; min(R0, 4*400) -> R1
+Min4R0toR1:
+	mov	R0, R1
+	cmp	R1, #4*400
+	blo	10$
+	mov	#4*400, R1
+10$:	return
+
+; [R2 R1] = [R2 R1] * 16 (no ASHC...)
+Mul16R2R1:
+	asl	R1
+	rol	R2
+	asl	R1
+	rol	R2
+	asl	R1
+	rol	R2
+	asl	R1
+	rol	R2
+	return
+
+; [R2 R1] = [R2 R1] / 16 (don't mind upper bit of R2)
+Div16R2R1:
+	asr	R2
+	ror	R1
+	asr	R2
+	ror	R1
+	asr	R2
+	ror	R1
+	asr	R2
+	ror	R1
+	return
+
+
+; //////////////////////////////////////////////////////////////////////////////
+; // Drawing
+; //////////////////////////////////////////////////////////////////////////////
+
+; fade screen by randomly removing tiles
+FadeScreen:
+	mov	#C_SCRWID-4, R2
+	mov	#255., R4
+10$:	call	Lfsr8				; R0 = (byte) [X][Y]
+	call	50$
+	sob	R4, 10$
+	clr	R0				; because we haven't 0 in random
+50$:	mov	R0, R1
+	bic	#^B1111111100001111, R1
+	asr	R1
+	asr	R1
+	bic	#^B1111111111110000, R0
+	swab	R0
+	asl	R0
+	asl	R0				; (!) must be *C_SCRWID*16.
+	add	R1, R0
+	add	#C_VADDR, R0
+	mov	#16., R3
+60$:	clr	(R0)+
+	clr	(R0)+
+	add	R2, R0
+	sob	R3, 60$
+	return
+
+
+; draw baby by vertical strips
+; must not draw over trash can
+; R0 - sprite #, R1 - X, R2 - Y
+DrawBaby:
+	; decrease Y by 4 (baby will have 4 black lines on top)
+	sub	#4, R2
+	; save X Y coords
+	mov	R1, R5
+	asr	R5
+	asr	R5				; to byte # in line
+SavedX =: .+2
+	mov	R5, #000000
+SavedY =: .+2
+	mov	R2, #000000
+	; maybe it's sprite #2 (they are shifted by 2px in Tiles)
+	asl	R0				; sprites are 2-in-1
+	bit	#^B10, R1			; is it coords like 2,3 etc?
+	beq	10$				; nope
+	inc	R0				; then increase tile #
+10$:	call	ComputeVaddr
+SavedVaddr =: .+2
+	mov	R5, #000000			; save vaddr
+	; compute sprite data addr, tile is 64 bytes
+	swab	R0				; (!) must not exceed 127
+	asr	R0
+	asr	R0
+	add	#TilesAddr, R0
+SavedSaddr =: .+2
+	mov	R0, #000000
+	; set helper regs
+	mov	#4, R1				; next line in sprite addition
+	mov	#C_SCRWID, R2			; next line in screen
+	; draw it
+	mov	#4, R4
+20$:	; draw one vertical strip
+	mov	SavedSaddr, R0			; set sprite addr
+	mov	#20., R3			; initial DY
+	mov	SavedVaddr, R5			; set vaddr
+	cmp	SavedX, #4.
+	blo	60$				; left wall - don't draw there
+	cmp	SavedX, #C_TRASH_X/4
+	blo	30$
+	cmp	SavedY, #C_TRASH_Y-20.
+	blos	30$
+	mov	#C_TRASH_Y, R3
+	sub	SavedY, R3
+	ble	60$
+30$:	.rept 4
+	clrb	(R5)
+	add	R2, R5
+	dec	R3
+	beq	60$
+	.endr
+40$:	movb	(R0), (R5)
+	add	R1, R0
+	add	R2, R5
+	sob	R3, 40$
+60$:	; advance coords
+	inc	SavedX				; increase saved X
+	inc	SavedSaddr			; increase spraddr
+	inc	SavedVaddr			; increase vaddr
+	sob	R4, 20$
+	return
+	
+
+; sprite 16x16 without mask (draw from tiles)
+; R0 - sprite #, R1 - X, R2 - Y
+DrawSprite:
+	; maybe it's sprite #2 (they are shifted by 2px in Tiles)
+	asl	R0				; sprites are 2-in-1
+	bit	#^B10, R1			; is it coords like 2,3 etc?
+	beq	DrawTile			; nope
+	inc	R0				; then increase tile #
+DrawTile:
+	mov	R1, -(SP)
+	mov	R2, -(SP)
+	mov	R3, -(SP)
+	mov	R4, -(SP)
+	mov	R5, -(SP)
+	call	ComputeVaddr
+	; compute sprite data addr, tile is 64 bytes
+	swab	R0				; (!) must not exceed 127
+	asr	R0
+	asr	R0
+	add	#TilesAddr, R0
+	; drawing cycle
+	mov	#16., R3			; sprite height
+	mov	#C_SCRWID-4., R2		; next line addition	
+20$:	movb	(R0)+, (R5)+
+	movb	(R0)+, (R5)+
+	movb	(R0)+, (R5)+
+	movb	(R0)+, (R5)+
+	add	R2, R5
+	sob	R3, 20$
+	mov	(SP)+, R5
+	mov	(SP)+, R4
+	mov	(SP)+, R3
+	mov	(SP)+, R2
+	mov	(SP)+, R1
+	return
+
+
+; R1 - x, R2 - y -> to vaddr R5
+ComputeVaddr:
+	mov	#C_VADDR, R5
+	asr	R1
+	asr	R1				; R1 = X / 4
+	add	R1, R5
+	swab	R2
+	clc
+	ror	R2
+	asr	R2				; R2 = Y * 64
+	add	R2, R5				; R5 = vaddr
+	return
+
+
+; //////////////////////////////////////////////////////////////////////////////
+; // Utils
+; //////////////////////////////////////////////////////////////////////////////
+
+; guess what
+RetAdr:	return
+
+
+; Galois LFSR 16-bit
+; -> R0
+Random:
+Lfsr16:	clc
+	ror	#126341
+	bcc	10$
+	mov	#^B1011010000000000, R0
+	xor	R0, Lfsr16+4
+10$:	mov	Lfsr16+4, R0
+	return
+
+
+; LFSR 8-bit random (Galois), 2^8-1 cycle
+; cycle xor: 8-bit [10111000] 9-bit [110110000]
+Lfsr8:	asr	#123
+	bcc	10$
+	mov	#^B0000000010111000, R0
+	xor	R0, Lfsr8+2
+10$:	mov	Lfsr8+2, R0
+	return
+
+
+; Manwe's 16 bit random (better than LFSR)
+; -> R0
+;Random:	mov	R1, -(SP)
+;	mov	(PC)+, R0
+;RndSe1:	.word	173451
+;	mov	(PC)+, R1
+;RndSe2:	.word	54102
+;	ror	R0
+;	rol	R1
+;	swab	R1
+;	xor	R1, R0
+;	mov	R0, RndSe1
+;	mov	R1, RndSe2
+;	mov	(SP)+, R1
+;	return
+
+
+; vsync for 0011M - just reset timer
+VsyInt:	mov	#20, @#177712
+	rti
+
+
+; wait for vsync
+VsyncWait:
+	mov	#177710, R0
+TimerLine =: .+2
+	cmp	#000360, (R0)
+	bne	.-4
+	inc	(PC)+
+FrameCount:	.word	0
+	return
+
+
+; keyboard simple
+Kbd274:
+KbdInt:	mov	R0, -(SP)
+	mov	@#177662, R0
+	mov	R0, (PC)+
+KeyCur:	.word	0
+	; TODO: process keys
+	mov	(SP)+, R0
+	rti
+
+
+; //////////////////////////////////////////////////////////////////////////////
+; // Data
+; //////////////////////////////////////////////////////////////////////////////
+
+BabiesYTbl:	.byte	C_WINDOW_Y1-20, C_WINDOW_Y2-20, C_WINDOW_Y3-20, C_WINDOW_Y2-20
+Babies:		.blkb	C_BABY_COUNT*C_BABY_LEN
+
+ZZ =: 39.
+		.radix	10
+BgrData:	.byte	ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 00
+		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 01
+		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 02
+		.byte	28, 29, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 03
+		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 04
+		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 05
+		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 06
+		.byte	28, 29, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 07
+		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 08
+		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 09
+		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 10
+		.byte	28, 29, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 11
+		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, 07, 08, 09		; 12
+		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, 17, 18, 19		; 13
+		.byte	28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28		; 14
+		.byte	28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28		; 15
+		.radix	8
+
+; //////////////////////////////////////////////////////////////////////////////
+; // Includes
+; //////////////////////////////////////////////////////////////////////////////
+
+@include graphics.mac
+
+End:
+	.end	Start
