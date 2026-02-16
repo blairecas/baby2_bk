@@ -15,12 +15,14 @@ C_WINDOW_Y2	=: 07.*16.
 C_WINDOW_Y3	=: 11.*16.
 
 C_MAX_BABY_X	=: 256.-20.*400
+C_MIN_BABY_X	=: 16.
 C_FLO_BABY_Y	=: 208.*400
 C_TRA_BABY_Y	=: 202.*400
 
 C_TRASH_X	=: 13.*16.
 C_TRASH_Y	=: 12.*16.
 
+ZZ 		=: 39.				; 'empty' (black) sprite
 C_SPR_BABY1	=: 00.
 C_SPR_WINDOW	=: 29.
 
@@ -33,7 +35,9 @@ C_BABY_X	=: 06
 C_BABY_Y	=: 10
 C_BABY_DX	=: 12
 C_BABY_DY	=: 14
-C_BABY_LEN	=: 16				; (!) in bytes
+C_BABY_PX	=: 16				; prev X
+C_BABY_PY	=: 20				; prev Y
+C_BABY_LEN	=: 22				; (!) in bytes
 
 C_AI_NONE	=: 0
 C_AI_WALKOUT	=: 1
@@ -179,22 +183,6 @@ MainGame:
 	return
 
 
-; background prepare
-DrawBackground:
-	mov	#BgrData, R5
-	clr	R2
-	mov	#16., R3
-10$:	mov	#16., R4
-	clr	R1
-20$:	movb	(R5)+, R0
-	call	DrawTile
-	add	#16., R1
-	sob	R4, 20$
-	add	#16., R2
-	sob	R3, 10$
-	return
-
-
 ; //////////////////////////////////////////////////////////////////////////////
 ; // Baby logic
 ; //////////////////////////////////////////////////////////////////////////////
@@ -239,7 +227,7 @@ BabyTimer =: .+2
 	call	Random
 	mov	R0, R1
 	bic	#^B1111111111111100, R1
-	movb	BabiesYTbl(R1), R2		; (!) can be negative
+	movb	BabiesYTbl(R1), R2
 LastWindowY =: .+2
 	cmp	R2, #000000			; do not exit from one window (Y-coord) twice
 	bne	20$
@@ -260,32 +248,20 @@ LastWindowY =: .+2
 	bic	#^B1111111110000000, R0
 	add	#1*400+200, R0
 	mov	R0, (R5)+			; 014 - set DY
+	; prev x, y
+	clr	(R5)+
+	clr	(R5)+
 99$:	return
 
 
 ; draw babies
 BabyDraw:
 	mov	#Babies, R5
-	call	100$
-	add	#C_BABY_LEN, R5
-	call	100$
-	add	#C_BABY_LEN, R5
-100$:	; do we need to draw at all?
-	tst	(R5)
-	beq	199$
-	; draw one baby, R5 - it's data addr
-	mov	R5, -(SP)
-	add	#C_BABY_SPRITE, R5
-	mov	(R5)+, R0			; spr
-	mov	(R5)+, R1			; x
-	clrb	R1
-	swab	R1				; float to int
-	mov	(R5)+, R2			; y
-	clrb	R2
-	swab	R2				; float to int
 	call	DrawBaby
-	mov	(SP)+, R5
-199$:	return
+	add	#C_BABY_LEN, R5
+	call	DrawBaby
+	add	#C_BABY_LEN, R5
+	jmp	DrawBaby
 
 
 ; process babies
@@ -357,6 +333,8 @@ BabyRight:
 	cmp	R0, #32.*400
 	bhi	99$
 	; it is
+	mov	#ZZ, C_BABY_SPRITE(R5)		; 'empty' sprite
+	call	DrawBaby
 	clr	(R5)				; clear AI
 	clr	C_BABY_AIPAR(R5)		; clear AI parameter
 99$:	return
@@ -456,18 +434,50 @@ FadeScreen:
 	return
 
 
+; emerge background from tileset
+DrawBackground:
+	mov	#255., R3
+10$:	call	Lfsr8				; R0 = (byte) [Y][X]
+	call	50$
+	sob	R3, 10$
+	clr	R0				; because we haven't 0 in random
+50$:	; x
+	mov	R0, R1
+	bic	#^B1111111111110000, R1
+	asl	R1
+	asl	R1
+	asl	R1
+	asl	R1
+	; y
+	mov	R0, R2
+	bic	#^B1111111100001111, R2	
+	; tile #
+	movb	BgrData(R0), R0
+	jmp	DrawTile
+
+
 ; draw baby by vertical strips
 ; must not draw over trash can
-; R0 - sprite #, R1 - X, R2 - Y
+; R5 - addr of baby data
 DrawBaby:
-	; decrease Y by 4 (baby will have 4 black lines on top)
-	sub	#4, R2
+	tst	(R5)
+	bne	02$				; no baby AI - nothing to draw
+	return
+02$:	mov	R5, -(SP)
+	add	#C_BABY_SPRITE, R5
+	mov	(R5)+, R0			; spr
+	mov	(R5)+, R1			; x
+	clrb	R1
+	swab	R1				; R1 - X (uint)
+	mov	(R5)+, R2			; y
+	clrb	R2
+	swab	R2				; R2 - Y (uint)
 	; save X Y coords
-	mov	R1, R5
-	asr	R5
-	asr	R5				; to byte # in line
+	mov	R1, R4
+	asr	R4
+	asr	R4				; to byte # in line
 SavedX =: .+2
-	mov	R5, #000000
+	mov	R4, #000000
 SavedY =: .+2
 	mov	R2, #000000
 	; maybe it's sprite #2 (they are shifted by 2px in Tiles)
@@ -492,23 +502,17 @@ SavedSaddr =: .+2
 	mov	#4, R4
 20$:	; draw one vertical strip
 	mov	SavedSaddr, R0			; set sprite addr
-	mov	#20., R3			; initial DY
 	mov	SavedVaddr, R5			; set vaddr
-	cmp	SavedX, #4.
+	cmp	SavedX, #C_MIN_BABY_X/4
 	blo	60$				; left wall - don't draw there
+	mov	#16., R3			; initial DY
 	cmp	SavedX, #C_TRASH_X/4
-	blo	30$
-	cmp	SavedY, #C_TRASH_Y-20.
-	blos	30$
+	blo	40$
+	cmp	SavedY, #C_TRASH_Y-16.
+	blos	40$
 	mov	#C_TRASH_Y, R3
 	sub	SavedY, R3
 	ble	60$
-30$:	.rept 4
-	clrb	(R5)
-	add	R2, R5
-	dec	R3
-	beq	60$
-	.endr
 40$:	movb	(R0), (R5)
 	add	R1, R0
 	add	R2, R5
@@ -518,8 +522,110 @@ SavedSaddr =: .+2
 	inc	SavedSaddr			; increase spraddr
 	inc	SavedVaddr			; increase vaddr
 	sob	R4, 20$
+	mov	(SP)+, R5
+; clean previous by X if any
+DrawBabyPrevX:
+	; vertical 4-pix	
+	mov	C_BABY_PX(R5), R1
+	beq	DrawBabySetPrev
+	cmp	R1, #C_MIN_BABY_X/4
+	blo	DrawBabyPrevY
+	mov	C_BABY_X(R5), R2
+	clrb	R2
+	swab	R2
+	asr	R2
+	asr	R2
+	cmp	R2, R1
+	beq	DrawBabyPrevY
+	; draw vertical then
+	mov	C_BABY_PY(R5), R2
+	mov	R2, R4
+	swab	R4
+	clc
+	ror	R4
+	asr	R4
+	add	#C_VADDR, R4
+	add	R1, R4				; R4 - vaddr
+	; 
+	mov	#16., R3			; initial DY
+	cmp	R1, #C_TRASH_X/4
+	blo	30$
+	cmp	R2, #C_TRASH_Y-16.
+	blos	30$
+	mov	#C_TRASH_Y, R3
+	sub	R2, R3
+	ble	DrawBabyPrevY
+30$:	mov	#C_SCRWID, R2
+40$:	clrb	(R4)
+	add	R2, R4
+	sob	R3, 40$
+; clean previous by Y if any
+DrawBabyPrevY:
+	mov	C_BABY_PY(R5), R0
+	mov	C_BABY_Y(R5), R2
+	clrb	R2
+	swab	R2
+	sub	R0, R2
+	beq	DrawBabySetPrev
+	bpl	10$
+	add	#16., R0
+	add	R2, R0
+	neg	R2
+10$:	mov	R0, SavedY
+	; update DY and trash_y-dy
+	mov	R2, 22$+2
+	mov	#C_TRASH_Y, R3
+	sub	R2, R3
+	mov	R3, 30$+4
+	; set savedx
+	mov	C_BABY_PX(R5), R1
+	mov	R1, SavedX
+	; get vaddr
+	swab	R0
+	clc
+	ror	R0
+	asr	R0
+	add	#C_VADDR, R0
+	add	R1, R0
+	mov	R0, SavedVaddr
+	; draw 4 vertical strips
+	mov	#4, R4
+	mov	#C_SCRWID, R2
+20$:	; draw one vertical strip
+	mov	SavedVaddr, R0
+	cmp	SavedX, #C_MIN_BABY_X/4
+	blo	60$
+22$:	mov	#000000, R3
+	cmp	SavedX, #C_TRASH_X/4
+	blo	40$
+30$:	cmp	SavedY, #000000
+	blos	40$
+	mov	#C_TRASH_Y, R3
+	sub	SavedY, R3
+	ble	60$
+40$:	clrb	(R0)
+	add	R2, R0
+	sob	R3, 40$
+60$:	; advance coords
+	inc	SavedX	
+	inc	SavedVaddr
+	sob	R4, 20$
+
+
+; set baby coords to previous
+DrawBabySetPrev:
+	mov	C_BABY_X(R5), R1
+	clrb	R1
+	swab	R1
+	asr	R1
+	asr	R1
+	mov	R1, C_BABY_PX(R5)
+	mov	C_BABY_Y(R5), R1
+	clrb	R1
+	swab	R1
+	mov	R1, C_BABY_PY(R5)
 	return
-	
+
 
 ; sprite 16x16 without mask (draw from tiles)
 ; R0 - sprite #, R1 - X, R2 - Y
@@ -653,7 +759,6 @@ KeyCur:	.word	0
 BabiesYTbl:	.byte	C_WINDOW_Y1-20, C_WINDOW_Y2-20, C_WINDOW_Y3-20, C_WINDOW_Y2-20
 Babies:		.blkb	C_BABY_COUNT*C_BABY_LEN
 
-ZZ =: 39.
 		.radix	10
 BgrData:	.byte	ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 00
 		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 01
