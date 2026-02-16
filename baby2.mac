@@ -155,6 +155,7 @@ MainCycleTbl:	.word	MainMenuInit, MainMenu, MainInit, MainGame
 
 ; initialize main menu
 MainMenuInit:
+	call	MusicMute
 	call	FadeScreen
 	inc	CurrentMode
 	return
@@ -171,6 +172,9 @@ MainInit:
 	call	FadeScreen
 	call	BabiesClear
 	call	DrawBackground
+	mov	#0, R0				; song #
+	clr	R1				; repeat it
+	call	MusicInit
 	inc	CurrentMode
 	return
 
@@ -180,6 +184,7 @@ MainGame:
 	call	BabyPrepare
 	call	BabyDraw
 	call	BabyProcess
+	call	MusicPlay
 	return
 
 
@@ -679,8 +684,40 @@ ComputeVaddr:
 
 
 ; //////////////////////////////////////////////////////////////////////////////
+; // Music
+; //////////////////////////////////////////////////////////////////////////////
+
+MusicMute:
+NoMusic =: .+2
+	tst	#000000
+	beq	10$
+	return
+10$:	jmp	Mute
+
+
+MusicInit:
+	tst	NoMusic
+	beq	10$
+	return
+10$:	jmp	Init
+
+
+MusicPlay:
+	tst	NoMusic
+	beq	10$
+	return
+10$:	jmp	Play
+
+
+; //////////////////////////////////////////////////////////////////////////////
 ; // Utils
 ; //////////////////////////////////////////////////////////////////////////////
+
+; detect int4
+StopDetect:
+	inc	#000000
+	rti
+
 
 ; guess what
 RetAdr:	return
@@ -772,8 +809,8 @@ BgrData:	.byte	ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		;
 		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 09
 		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 10
 		.byte	28, 29, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 11
-		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, 07, 08, 09		; 12
-		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, 17, 18, 19		; 13
+		.byte	28, 28, 28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, 07, 08, 09		; 12
+		.byte	28, 28, 28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, 17, 18, 19		; 13
 		.byte	28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28		; 14
 		.byte	28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28		; 15
 		.radix	8
@@ -782,7 +819,19 @@ BgrData:	.byte	ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		;
 ; // Includes
 ; //////////////////////////////////////////////////////////////////////////////
 
+@include music.mac
+	.even
+
+MusicTable:
+	.word	M_Music1, M_Music1End
+
+M_Music1:
+	@includebin ./music/mast_benny.pt3
+M_Music1End:
+
 @include graphics.mac
+	.even
+
 
 End:
 	.end	Start
