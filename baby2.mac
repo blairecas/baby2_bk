@@ -20,11 +20,10 @@ C_FLO_BABY_Y	=: 208.*400
 C_TRA_BABY_Y	=: 202.*400
 
 C_TRASH_X	=: 13.*16.
-C_TRASH_Y	=: 12.*16.
+C_TRASH_Y	=: 11.*16.
 
-ZZ 		=: 39.				; 'empty' (black) sprite
+ZZ 		=: 07				; 'empty' (black) sprite
 C_SPR_BABY1	=: 00.
-C_SPR_WINDOW	=: 29.
 
 C_BABY_COUNT	=: 3
 
@@ -43,6 +42,36 @@ C_AI_NONE	=: 0
 C_AI_WALKOUT	=: 1
 C_AI_JUMP	=: 2
 C_AI_FALL	=: 3
+
+C_MEDIC10_SPR	=: 02
+C_MEDIC11_SPR	=: 13
+C_STRETCH_SPR	=: 06
+C_MEDIC20_SPR	=: 04
+C_MEDIC21_SPR	=: 15
+
+C_MEDIC_X	=: 7*16.    *400		; X are fixed point
+C_MEDIC_Y	=: 12.*16.
+C_MED_MIN_X	=: 3.*16.   *400
+C_MED_MAX_X	=: 10.*16.  *400
+C_MEDVEL_MIN	=: 1*256.
+C_MEDDVEL_MIN	=: 40.
+
+C_KEY_1		=: 61
+C_KEY_2		=: 62
+C_KEY_3		=: 63
+C_KEY_4		=: 64
+C_KEY_UP	=: 32
+C_KEY_DOWN	=: 33
+C_KEY_LEFT	=: 10
+C_KEY_RIGHT	=: 31
+C_KEY_SPACE	=: 40
+
+; joystick default bits
+P_KEY_UP	=: 001
+P_KEY_RIGHT	=: 002
+P_KEY_DOWN	=: 004
+P_KEY_LEFT	=: 010
+P_KEY_FIRE	=: 060 ; 2 buttons 'fire' (40) and 'key A' (20)
 
 
 Start:	mov	#1000, SP
@@ -172,6 +201,7 @@ MainInit:
 	call	FadeScreen
 	call	BabiesClear
 	call	DrawBackground
+	call	MedVelInit
 	mov	#0, R0				; song #
 	clr	R1				; repeat it
 	call	MusicInit
@@ -181,9 +211,18 @@ MainInit:
 
 ; main game cycle
 MainGame:
+	; babies on even frame
+	bit	#1, FrameCount
+	bne	10$
 	call	BabyPrepare
 	call	BabyDraw
 	call	BabyProcess
+	call	MusicPlay
+	return
+10$:	; medics on odd frame
+	call	KeysCheck
+	call	MedicsDraw
+	call	MedicsProcess
 	call	MusicPlay
 	return
 
@@ -410,6 +449,100 @@ Div16R2R1:
 
 
 ; //////////////////////////////////////////////////////////////////////////////
+; // Medics
+; //////////////////////////////////////////////////////////////////////////////
+
+; process medics movements
+MedicsProcess:
+	; both keys are up - clear velocities
+	mov	PpuKeys, R0
+	bit	#P_KEY_LEFT+P_KEY_RIGHT, R0
+	beq	MedVelInit
+	bit	#P_KEY_LEFT, PpuKeys
+	bne	MedicsLeft
+	bit	#P_KEY_RIGHT, PpuKeys
+	bne	MedicsRight
+	return
+
+; they are stopped
+MedVelInit:
+MedVel =: .+4
+	mov	#C_MEDVEL_MIN, #000000
+MedDVel =: .+4
+	mov	#C_MEDDVEL_MIN, #000000
+	return
+
+; they are going left
+MedicsLeft:
+	sub	MedVel, MedicX
+	add	MedDVel, MedVel
+	br	MedCoordsCorrect
+
+; they are going right
+MedicsRight:
+	add	MedVel, MedicX
+	add	MedDVel, MedVel
+
+; correct their coords if out of range
+MedCoordsCorrect:
+	cmp	MedicX, #C_MED_MIN_X
+	bhis	10$
+	mov	#C_MED_MIN_X, MedicX
+	call	MedVelInit
+10$:	cmp	MedicX, #C_MED_MAX_X
+	blos	99$
+	mov	#C_MED_MAX_X, MedicX
+	call	MedVelInit
+99$:	return
+
+
+; draw them
+MedicsDraw:
+	; 1st medic
+	mov	#C_MEDIC10_SPR, R0
+MedicX =: .+2
+	mov	#C_MEDIC_X, R1
+MedicY =: .+2
+	mov	#C_MEDIC_Y, R2
+	clrb	R1
+	swab	R1				; X is fixed point 
+	call	DrawSprite
+	mov	#C_MEDIC11_SPR, R0
+	mov	MedicX, R1
+	mov	MedicY, R2
+	clrb	R1
+	swab	R1
+	add	#16., R2
+	call	DrawSprite
+	; stretcher
+	mov	#C_STRETCH_SPR, R0
+	mov	MedicX, R1
+	mov	MedicY, R2
+	clrb	R1
+	swab	R1
+	add	#16., R1
+	add	#16., R2
+	call	DrawSprite
+	; 2nd medic
+	mov	#C_MEDIC20_SPR, R0
+	mov	MedicX, R1
+	mov	MedicY, R2
+	clrb	R1
+	swab	R1
+	add	#32., R1
+	call	DrawSprite
+	mov	#C_MEDIC21_SPR, R0
+	mov	MedicX, R1
+	mov	MedicY, R2
+	clrb	R1
+	swab	R1
+	add	#32., R1
+	add	#16., R2
+	call	DrawSprite
+	return
+
+
+; //////////////////////////////////////////////////////////////////////////////
 ; // Drawing
 ; //////////////////////////////////////////////////////////////////////////////
 
@@ -528,6 +661,7 @@ SavedSaddr =: .+2
 	inc	SavedVaddr			; increase vaddr
 	sob	R4, 20$
 	mov	(SP)+, R5
+
 ; clean previous by X if any
 DrawBabyPrevX:
 	; vertical 4-pix	
@@ -636,7 +770,6 @@ DrawBabySetPrev:
 ; R0 - sprite #, R1 - X, R2 - Y
 DrawSprite:
 	; maybe it's sprite #2 (they are shifted by 2px in Tiles)
-	asl	R0				; sprites are 2-in-1
 	bit	#^B10, R1			; is it coords like 2,3 etc?
 	beq	DrawTile			; nope
 	inc	R0				; then increase tile #
@@ -781,39 +914,48 @@ FrameCount:	.word	0
 ; keyboard simple
 Kbd274:
 KbdInt:	mov	R0, -(SP)
+	mov	R1, -(SP)
 	mov	@#177662, R0
 	mov	R0, (PC)+
 KeyCur:	.word	0
-	; TODO: process keys
+	mov	#KeyToPpu, R1
+10$:	cmp	R0, (R1)+
+	bne	20$
+PpuKeys =: .+2
+	bis	(R1), #000000
+	br	90$
+20$:	tst	(R1)+
+	cmp	R1, #KeyToPpuEnd
+	bne	10$
+90$:	mov	(SP)+, R1
 	mov	(SP)+, R0
 	rti
+
+
+; keyboard check
+KeysCheck:
+	bit	#100, @#177716			; any key pressed?
+	beq	10$				; yes
+	clr	PpuKeys
+10$:	return
 
 
 ; //////////////////////////////////////////////////////////////////////////////
 ; // Data
 ; //////////////////////////////////////////////////////////////////////////////
 
+KeyToPpu:	.word	C_KEY_LEFT,  P_KEY_LEFT
+		.word	C_KEY_RIGHT, P_KEY_RIGHT
+		.word	C_KEY_UP,    P_KEY_UP
+		.word	C_KEY_DOWN,  P_KEY_DOWN
+		.word	C_KEY_SPACE, P_KEY_FIRE
+KeyToPpuEnd:
+
+
 BabiesYTbl:	.byte	C_WINDOW_Y1-20, C_WINDOW_Y2-20, C_WINDOW_Y3-20, C_WINDOW_Y2-20
 Babies:		.blkb	C_BABY_COUNT*C_BABY_LEN
 
-		.radix	10
-BgrData:	.byte	ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 00
-		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 01
-		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 02
-		.byte	28, 29, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 03
-		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 04
-		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 05
-		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 06
-		.byte	28, 29, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 07
-		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 08
-		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 09
-		.byte	28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 10
-		.byte	28, 29, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ		; 11
-		.byte	28, 28, 28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, 07, 08, 09		; 12
-		.byte	28, 28, 28, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, 17, 18, 19		; 13
-		.byte	28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28		; 14
-		.byte	28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28		; 15
-		.radix	8
+@include bgr.mac
 
 ; //////////////////////////////////////////////////////////////////////////////
 ; // Includes
@@ -828,10 +970,6 @@ MusicTable:
 M_Music1:
 	@includebin ./music/mast_benny.pt3
 M_Music1End:
-
-@include graphics.mac
-	.even
-
 
 End:
 	.end	Start
