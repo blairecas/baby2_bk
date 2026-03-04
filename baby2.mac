@@ -16,14 +16,15 @@ C_WINDOW_Y3	=: 11.*16.
 
 C_MAX_BABY_X	=: 256.-20.*400
 C_MIN_BABY_X	=: 16.
-C_FLO_BABY_Y	=: 208.*400
+C_FLO_BABY_Y	=: 224.*400
 C_TRA_BABY_Y	=: 202.*400
 
 C_TRASH_X	=: 13.*16.
-C_TRASH_Y	=: 11.*16.
+C_TRASH_Y	=: 12.*16.
 
-ZZ 		=: 07				; 'empty' (black) sprite
-C_SPR_BABY1	=: 00.
+ZZ 		=: 00				; 'empty' (black) sprite
+C_SPR_BABY1	=: 02
+C_SPR_BOOM1	=: 13
 
 C_BABY_COUNT	=: 3
 
@@ -42,15 +43,16 @@ C_AI_NONE	=: 0
 C_AI_WALKOUT	=: 1
 C_AI_JUMP	=: 2
 C_AI_FALL	=: 3
+C_AI_BOOM	=: 4
 
-C_MEDIC10_SPR	=: 02
-C_MEDIC11_SPR	=: 13
-C_STRETCH_SPR	=: 06
-C_MEDIC20_SPR	=: 04
-C_MEDIC21_SPR	=: 15
+C_MEDIC10_SPR	=: 04
+C_MEDIC11_SPR	=: 15
+C_STRETCH_SPR	=: 10
+C_MEDIC20_SPR	=: 06
+C_MEDIC21_SPR	=: 17
 
 C_MEDIC_X	=: 7*16.    *400		; X are fixed point
-C_MEDIC_Y	=: 12.*16.
+C_MEDIC_Y	=: 13.*16.
 C_MED_MIN_X	=: 3.*16.   *400
 C_MED_MAX_X	=: 10.*16.  *400
 C_MEDVEL_MIN	=: 1*256.
@@ -85,7 +87,7 @@ Start:	mov	#1000, SP
 	mov	@#102, -(SP)
 	mov	@#274, -(SP)
 	mov	@#276, -(SP)
-	mov	SP, Stop+2
+	mov	SP, Stop+2			; (!) mutable SP addr in Stop
 	; set stop
 	mov	#Stop, @#4
 	mov	#200, @#6
@@ -134,6 +136,8 @@ Stop:	; stop key goes here
 	clr	R0
 	sob	R0, .
 	tst	@#177662			; read keyboard reg just in case
+	; cleanup background tilemap
+	call	CleanTilemap
 	; go to main game cycle
 	clr	CurrentMode
 	br	MainCycle
@@ -201,6 +205,7 @@ MainInit:
 	call	FadeScreen
 	call	BabiesClear
 	call	DrawBackground
+	call	MedicsInit
 	call	MedVelInit
 	mov	#0, R0				; song #
 	clr	R1				; repeat it
@@ -319,12 +324,12 @@ BabyProcess:
 	asl	R0
 	jmp	@BabyProcTbl(R0)
 
-BabyProcTbl:	.word	RetAdr, BabyWalkout, BabyJump, BabyFall
+BabyProcTbl:	.word	RetAdr, BabyWalkout, BabyJump, BabyFall, BabyBoom
 
 
 ; slow walk out of window
 BabyWalkout:
-	add	#32., C_BABY_X(R5)
+	add	#48., C_BABY_X(R5)
 	cmp	C_BABY_X(R5), #32.*400
 	blt	99$				; (!) not BLO here
 	mov	#C_AI_JUMP, (R5)		; set new AI to jump
@@ -357,6 +362,7 @@ BabyJump:
 
 ; baby going right
 BabyRight:
+	; decrease DX if we are close to max X
 	mov	#C_MAX_BABY_X, R0
 	sub	C_BABY_X(R5), R0
 	clc
@@ -377,6 +383,7 @@ BabyRight:
 	cmp	R0, #32.*400
 	bhi	99$
 	; it is
+BabyDead =: .
 	mov	#ZZ, C_BABY_SPRITE(R5)		; 'empty' sprite
 	call	DrawBaby
 	clr	(R5)				; clear AI
@@ -396,13 +403,37 @@ BabyFall:
 	adc	R2				; [R2 R1] * 17
 	call	Div16R2R1			; [R2 R1] / 16
 	mov	R1, C_BABY_DY(R5)
-	; check if at bottom
+	; check if at medic's stretcher
+	mov	MedicX, R0			; float
+	sub	#4*400, R0
+	cmp	C_BABY_X(R5), R0		; also float
+	blo	10$
+	add	#44.*400, R0
+	cmp	C_BABY_X(R5), R0
+	bhi	10$
+	mov	C_BABY_Y(R5), R0		; float
+	clrb	R0
+	swab	R0
+	add	#16., R0
+	mov	MedicY, R1
+	add	#15., R1
+	cmp	R0, R1
+	blo	10$
+	add	#4., R1
+	cmp	R0, R1
+	bhi	10$
+	; at stretcher - switch to jump
+	mov	#C_AI_JUMP, (R5)
+	br	90$
+10$:	; check if at real bottom
 	cmp	C_BABY_Y(R5), #C_FLO_BABY_Y
 	blo	BabyRight
-	; stick to bottom and switch to jump
+	; stick to bottom and switch to boom
 	mov	#C_FLO_BABY_Y, C_BABY_Y(R5)
-	mov	#C_AI_JUMP, (R5)
-	; decrease velocity if it's way too much
+	mov	#C_SPR_BOOM1, C_BABY_SPRITE(R5)
+	mov	#C_AI_BOOM, (R5)
+	mov	#32., C_BABY_AIPAR(R5)		; length of boom
+90$:	; decrease velocity if it's way too much
 	mov	C_BABY_DY(R5), R0
 	cmp	R0, #12.*400
 	blo	BabyRight
@@ -413,6 +444,13 @@ BabyFall:
 	asr	R1
 	mov	R1, C_BABY_DY(R5)
 	br	BabyRight
+
+
+; baby boom
+BabyBoom:
+	dec	C_BABY_AIPAR(R5)
+	bmi	BabyDead
+	return
 
 
 ; min(R0, 4*400) -> R1
@@ -452,6 +490,14 @@ Div16R2R1:
 ; // Medics
 ; //////////////////////////////////////////////////////////////////////////////
 
+; initialize
+MedicsInit:
+	mov	#C_MEDIC_X, MedicX
+	mov	#C_MEDIC_Y, MedicY
+	mov	#C_MEDIC_X/400/4, MedicPrevX
+	return
+
+
 ; process medics movements
 MedicsProcess:
 	; both keys are up - clear velocities
@@ -485,11 +531,15 @@ MedicsRight:
 
 ; correct their coords if out of range
 MedCoordsCorrect:
-	cmp	MedicX, #C_MED_MIN_X
-	bhis	10$
+	cmp	MedVel, #3*400
+	blos	10$
+	mov	#3*400, MedVel
+	mov	#300, MedDVel
+10$:	cmp	MedicX, #C_MED_MIN_X
+	bhis	20$
 	mov	#C_MED_MIN_X, MedicX
 	call	MedVelInit
-10$:	cmp	MedicX, #C_MED_MAX_X
+20$:	cmp	MedicX, #C_MED_MAX_X
 	blos	99$
 	mov	#C_MED_MAX_X, MedicX
 	call	MedVelInit
@@ -514,6 +564,11 @@ MedicY =: .+2
 	swab	R1
 	add	#16., R2
 	call	DrawSprite
+	; clear diffs for 1st
+	mov	#16., R3
+	mov	#8., R4
+	clr	MedDiffXAdd
+	call	DrawMedDiff
 	; stretcher
 	mov	#C_STRETCH_SPR, R0
 	mov	MedicX, R1
@@ -539,6 +594,18 @@ MedicY =: .+2
 	add	#32., R1
 	add	#16., R2
 	call	DrawSprite
+	; clear diffs for 2nd
+	mov	#8., R3
+	mov	#16., R4
+	mov	#8., MedDiffXAdd
+	call	DrawMedDiff
+	; save prev coord
+	mov	MedicX, R0
+	clrb	R0
+	swab	R0
+	asr	R0
+	asr	R0
+	mov	R0, MedicPrevX
 	return
 
 
@@ -594,6 +661,56 @@ DrawBackground:
 	jmp	DrawTile
 
 
+; draw vertical strips around medics if they moved
+DrawMedDiff:
+	mov	MedicX, R0
+	clrb	R0
+	swab	R0
+	asr	R0
+	asr	R0
+MedicPrevX =: .+2
+	mov	#000000, R1
+	cmp	R0, R1
+	beq	99$
+	blo	50$
+	; draw R3-px stripe on left side
+	mov	#C_VADDR, R5
+	add	R1, R5
+MedDiffXAdd =: .+2
+	add	#000000, R5
+	mov	MedicY, R2
+	swab	R2
+	clc
+	ror	R2
+	asr	R2				; R2 = Y * 64
+	add	R2, R5				; R5 = vaddr
+	mov	#C_SCRWID, R2
+10$:	clrb	(R5)
+	add	R2, R5
+	clrb	(R5)
+	add	R2, R5
+	sob	R3, 10$
+	return
+50$:	; draw R4-px stripe on right side
+	mov	#C_VADDR, R5
+	add	R1, R5
+	add	#3, R5
+	add	MedDiffXAdd, R5
+	mov	MedicY, R2
+	swab	R2
+	clc
+	ror	R2
+	asr	R2				; R2 = Y * 64
+	add	R2, R5				; R5 = vaddr
+	mov	#C_SCRWID, R2
+60$:	clrb	(R5)
+	add	R2, R5
+	clrb	(R5)
+	add	R2, R5
+	sob	R4, 60$
+99$:	return
+
+
 ; draw baby by vertical strips
 ; must not draw over trash can
 ; R5 - addr of baby data
@@ -619,8 +736,7 @@ SavedX =: .+2
 SavedY =: .+2
 	mov	R2, #000000
 	; maybe it's sprite #2 (they are shifted by 2px in Tiles)
-	asl	R0				; sprites are 2-in-1
-	bit	#^B10, R1			; is it coords like 2,3 etc?
+	bit	#^B10, R1			; is it coords like 2,3 ?
 	beq	10$				; nope
 	inc	R0				; then increase tile #
 10$:	call	ComputeVaddr
@@ -938,6 +1054,18 @@ KeysCheck:
 	beq	10$				; yes
 	clr	PpuKeys
 10$:	return
+
+
+; clean some data from background tilemap
+CleanTilemap:
+	mov	#BgrData+2, R0
+	mov	#8., R1
+10$:	mov	#8., R2
+20$:	clrb	(R0)+
+	sob	R2, 20$
+	add	#16.-8., R0
+	sob	R1, 10$
+	return
 
 
 ; //////////////////////////////////////////////////////////////////////////////
