@@ -25,8 +25,8 @@ C_TRASH_Y	=: 12.*16.
 ZZ 		=: 00				; 'empty' (black) sprite
 C_SPR_BABY1	=: 02
 C_SPR_BOOM1	=: 13
-C_SPR_OBJ1	=: 24
-C_SPR_OBJBOO1	=: 37
+C_SPR_OBJ1	=: 25
+C_SPR_OBJBOO1	=: 40
 
 C_BABY_COUNT	=: 3
 
