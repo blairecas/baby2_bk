@@ -25,6 +25,7 @@ C_TRASH_Y	=: 12.*16.
 ZZ 		=: 00				; 'empty' (black) sprite
 C_SPR_BABY1	=: 02
 C_SPR_BOOM1	=: 13
+C_SPR_OBJ1	=: 21
 
 C_BABY_COUNT	=: 3
 
@@ -44,6 +45,8 @@ C_AI_WALKOUT	=: 1
 C_AI_JUMP	=: 2
 C_AI_FALL	=: 3
 C_AI_BOOM	=: 4
+C_AI_OBJOUT	=: 5
+C_AI_OBJFALL	=: 6
 
 C_MEDIC10_SPR	=: 04
 C_MEDIC11_SPR	=: 15
@@ -245,6 +248,17 @@ BabiesClear:
 	return
 
 
+; objects/baby table
+BabyObjTbl:
+	.word	C_AI_WALKOUT, C_SPR_BABY1
+	.word	C_AI_WALKOUT, C_SPR_BABY1
+	.word	C_AI_OBJOUT, C_SPR_OBJ1
+	.word	C_AI_WALKOUT, C_SPR_BABY1
+	.word	C_AI_WALKOUT, C_SPR_BABY1
+	.word	C_AI_WALKOUT, C_SPR_BABY1
+	.word	C_AI_WALKOUT, C_SPR_BABY1
+	.word	C_AI_OBJOUT, C_SPR_OBJ1
+
 ; prepare another baby (set as walking out of window)
 BabyPrepare:
 	; wait timer
@@ -252,7 +266,8 @@ BabyTimer =: .+2
 	dec	#000000
 	bgt	99$
 	call	Lfsr8
-	add	#100, R0
+	bic	#^B10000000, R0
+	add	#140, R0
 	mov	R0, BabyTimer
 	; get an empty one and prepare it
 	mov	#Babies, R5
@@ -265,11 +280,15 @@ BabyTimer =: .+2
 	tst	(R5)
 	beq	10$
 	return
-10$:	; set baby as walking out
-	mov	#C_AI_WALKOUT, (R5)+		; 000 - set baby AI mode
+10$:	; check what it is? baby or object
+	call	Random
+	bic	#^B1111111111100011, R0
+	add	#BabyObjTbl, R0
+	; set baby as walking out
+	mov	(R0)+, (R5)+			; 000 - set baby AI mode
 	clr	(R5)+				; 002 - reserved AI parameter
 	; sprite
-	mov	#C_SPR_BABY1, (R5)+		; 004 - set sprite
+	mov	(R0)+, (R5)+			; 004 - set sprite
 	; coords - x
 	mov	#0.*400, (R5)+			; 006 - set X (float)
 	; coords - y
@@ -325,6 +344,7 @@ BabyProcess:
 	jmp	@BabyProcTbl(R0)
 
 BabyProcTbl:	.word	RetAdr, BabyWalkout, BabyJump, BabyFall, BabyBoom
+		.word	ObjOut, ObjFall
 
 
 ; slow walk out of window
@@ -333,7 +353,6 @@ BabyWalkout:
 	cmp	C_BABY_X(R5), #32.*400
 	blt	99$				; (!) not BLO here
 	mov	#C_AI_JUMP, (R5)		; set new AI to jump
-	clr	C_BABY_AIPAR(R5)		; clear AI parameter
 99$:	return
 
 
@@ -387,7 +406,6 @@ BabyDead =: .
 	mov	#ZZ, C_BABY_SPRITE(R5)		; 'empty' sprite
 	call	DrawBaby
 	clr	(R5)				; clear AI
-	clr	C_BABY_AIPAR(R5)		; clear AI parameter
 99$:	return
 
 
@@ -404,6 +422,96 @@ BabyFall:
 	call	Div16R2R1			; [R2 R1] / 16
 	mov	R1, C_BABY_DY(R5)
 	; check if at medic's stretcher
+	call	IsStretcher
+	bcs	10$
+	; at stretcher - switch to jump
+	mov	#C_AI_JUMP, (R5)
+	br	90$
+10$:	; check if at real bottom
+	cmp	C_BABY_Y(R5), #C_FLO_BABY_Y
+	blo	BabyRight
+	; stick to bottom and switch to boom
+	mov	#C_FLO_BABY_Y, C_BABY_Y(R5)
+	bic	#^B0000001111111111, C_BABY_X(R5)	; set X to be 4-pix aligned
+	mov	#C_SPR_BOOM1, C_BABY_SPRITE(R5)
+	mov	#C_AI_BOOM, (R5)
+	mov	#20., C_BABY_AIPAR(R5)		; length of boom
+90$:	; decrease velocity if it's way too much
+	mov	C_BABY_DY(R5), R0
+	cmp	R0, #12.*400
+	blo	BabyRight
+	mov	R0, R1
+	add	R0, R1
+	add	R0, R1
+	asr	R1
+	asr	R1
+	mov	R1, C_BABY_DY(R5)
+	br	BabyRight
+
+
+; baby boom
+BabyBoom:
+	dec	C_BABY_AIPAR(R5)
+	bmi	BabyDead
+	cmp	C_BABY_AIPAR(R5), #16.
+	bne	99$
+	add	#^B0000001000000000, C_BABY_X(R5)	; add 2 to X (to switch sprite)
+99$:	return
+
+
+; object out of window
+ObjOut:
+	add	#64., C_BABY_X(R5)
+	cmp	C_BABY_X(R5), #32.*400
+	blt	99$				; (!) not BLO here
+	mov	#C_AI_OBJFALL, (R5)
+	; set DX DY here (don't use babie-s default)
+	call	Lfsr8
+	add	#200, R0
+	mov	R0, C_BABY_DX(R5)
+	; dy
+	mov	#20, C_BABY_DY(R5)
+99$:	return
+
+
+; object going right
+ObjRight:
+	add	C_BABY_DX(R5), C_BABY_X(R5)
+	return
+
+
+; london bridge is falling down..
+ObjFall:
+	mov	C_BABY_DY(R5), R0
+	call	Min4R0toR1
+	add	R1, C_BABY_Y(R5)
+	mov	R0, R1
+	clr	R2				; DY -> [R2 R1]
+	call	Mul16R2R1
+	add	R0, R1
+	adc	R2				; [R2 R1] * 17
+	call	Div16R2R1			; [R2 R1] / 16
+	mov	R1, C_BABY_DY(R5)
+	; check if at medic's stretcher
+	call	IsStretcher
+	bcs	10$
+	; at stretcher - TODO: we hit medics
+	br	80$
+10$:	; check if at real bottom
+	cmp	C_BABY_Y(R5), #C_FLO_BABY_Y
+	blo	ObjRight
+	; stick to bottom and switch to boom
+	mov	#C_FLO_BABY_Y, C_BABY_Y(R5)
+80$:	bic	#^B0000001111111111, C_BABY_X(R5)	; set X to be 4-pix aligned
+	mov	#C_SPR_BOOM1, C_BABY_SPRITE(R5)
+	mov	#C_AI_BOOM, (R5)
+	mov	#20., C_BABY_AIPAR(R5)		; length of boom
+	return
+
+
+; check if at medic's stretcher
+; C=1 - not
+IsStretcher:
 	mov	MedicX, R0			; float
 	sub	#4*400, R0
 	cmp	C_BABY_X(R5), R0		; also float
@@ -422,34 +530,8 @@ BabyFall:
 	add	#4., R1
 	cmp	R0, R1
 	bhi	10$
-	; at stretcher - switch to jump
-	mov	#C_AI_JUMP, (R5)
-	br	90$
-10$:	; check if at real bottom
-	cmp	C_BABY_Y(R5), #C_FLO_BABY_Y
-	blo	BabyRight
-	; stick to bottom and switch to boom
-	mov	#C_FLO_BABY_Y, C_BABY_Y(R5)
-	mov	#C_SPR_BOOM1, C_BABY_SPRITE(R5)
-	mov	#C_AI_BOOM, (R5)
-	mov	#32., C_BABY_AIPAR(R5)		; length of boom
-90$:	; decrease velocity if it's way too much
-	mov	C_BABY_DY(R5), R0
-	cmp	R0, #12.*400
-	blo	BabyRight
-	mov	R0, R1
-	add	R0, R1
-	add	R0, R1
-	asr	R1
-	asr	R1
-	mov	R1, C_BABY_DY(R5)
-	br	BabyRight
-
-
-; baby boom
-BabyBoom:
-	dec	C_BABY_AIPAR(R5)
-	bmi	BabyDead
+	tst	(PC)+
+10$:	sec
 	return
 
 
