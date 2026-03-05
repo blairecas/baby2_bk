@@ -26,7 +26,7 @@ ZZ 		=: 00				; 'empty' (black) sprite
 C_SPR_BABY1	=: 02
 C_SPR_BOOM1	=: 13
 C_SPR_OBJ1	=: 24
-C_SPR_OBJBOO1	=: 33
+C_SPR_OBJBOO1	=: 37
 
 C_BABY_COUNT	=: 3
 
