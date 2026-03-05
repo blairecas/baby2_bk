@@ -25,7 +25,8 @@ C_TRASH_Y	=: 12.*16.
 ZZ 		=: 00				; 'empty' (black) sprite
 C_SPR_BABY1	=: 02
 C_SPR_BOOM1	=: 13
-C_SPR_OBJ1	=: 21
+C_SPR_OBJ1	=: 24
+C_SPR_OBJBOO1	=: 33
 
 C_BABY_COUNT	=: 3
 
@@ -399,7 +400,7 @@ BabyRight:
 	blo	99$
 	mov	#C_MAX_BABY_X, R0
 	sub	C_BABY_X(R5), R0
-	cmp	R0, #32.*400
+	cmp	R0, #40.*400
 	bhi	99$
 	; it is
 BabyDead =: .
@@ -503,7 +504,7 @@ ObjFall:
 	; stick to bottom and switch to boom
 	mov	#C_FLO_BABY_Y, C_BABY_Y(R5)
 80$:	bic	#^B0000001111111111, C_BABY_X(R5)	; set X to be 4-pix aligned
-	mov	#C_SPR_BOOM1, C_BABY_SPRITE(R5)
+	mov	#C_SPR_OBJBOO1, C_BABY_SPRITE(R5)
 	mov	#C_AI_BOOM, (R5)
 	mov	#20., C_BABY_AIPAR(R5)		; length of boom
 	return
@@ -513,10 +514,10 @@ ObjFall:
 ; C=1 - not
 IsStretcher:
 	mov	MedicX, R0			; float
-	sub	#4*400, R0
+	sub	#8.*400, R0
 	cmp	C_BABY_X(R5), R0		; also float
 	blo	10$
-	add	#44.*400, R0
+	add	#48.*400, R0
 	cmp	C_BABY_X(R5), R0
 	bhi	10$
 	mov	C_BABY_Y(R5), R0		; float
