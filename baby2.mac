@@ -22,11 +22,24 @@ C_TRA_BABY_Y	=: 202.*400
 C_TRASH_X	=: 13.*16.
 C_TRASH_Y	=: 12.*16.
 
-ZZ 		=: 00				; 'empty' (black) sprite
-C_SPR_BABY1	=: 02
-C_SPR_BOOM1	=: 13
-C_SPR_OBJ1	=: 25
-C_SPR_OBJBOO1	=: 40
+; sprites #
+ZZ 		=: 00				; empty (black) sprite
+; moving
+C_SPR_BABY1	=: 02				; baby sprite
+C_SPR_BABY2	=: 33				; cat sprite
+C_SPR_OBJ1	=: 27				; weight sprite
+C_SPR_OBJ2	=: 43				; flower sprite
+; animated
+C_SPR_BOOM1	=: 13				; baby/cat splash
+C_SPR_OBJBOO1	=: C_SPR_OBJ1 + 2		; weight splash
+C_SPR_OBJBOO2	=: C_SPR_OBJ2 + 2		; flower splash
+C_SPR_FIRE1	=: 21				; fire from window
+; medics
+C_SPR_MEDIC10	=: 04
+C_SPR_MEDIC11	=: 15
+C_SPR_STRETCH	=: 10
+C_SPR_MEDIC20	=: 06
+C_SPR_MEDIC21	=: 17
 
 C_BABY_COUNT	=: 3
 
@@ -42,18 +55,13 @@ C_BABY_PY	=: 20				; prev Y
 C_BABY_LEN	=: 22				; (!) in bytes
 
 C_AI_NONE	=: 0
-C_AI_WALKOUT	=: 1
-C_AI_JUMP	=: 2
-C_AI_FALL	=: 3
-C_AI_BOOM	=: 4
-C_AI_OBJOUT	=: 5
-C_AI_OBJFALL	=: 6
-
-C_MEDIC10_SPR	=: 04
-C_MEDIC11_SPR	=: 15
-C_STRETCH_SPR	=: 10
-C_MEDIC20_SPR	=: 06
-C_MEDIC21_SPR	=: 17
+C_AI_WALKOUT	=: 1				; baby/cat walking out
+C_AI_JUMP	=: 2				; -/- jumping
+C_AI_FALL	=: 3				; -/- falling
+C_AI_BOOM	=: 4				; boom 
+C_AI_OBJOUT	=: 5				; object walking out
+C_AI_OBJFALL	=: 6				; object falling (can't jump)
+C_AI_FIRE	=: 7				; fire from window
 
 C_MEDIC_X	=: 7*16.    *400		; X are fixed point
 C_MEDIC_Y	=: 13.*16.
@@ -80,6 +88,7 @@ P_KEY_LEFT	=: 010
 P_KEY_FIRE	=: 060 ; 2 buttons 'fire' (40) and 'key A' (20)
 
 
+; main entry point
 Start:	mov	#1000, SP
 	mtps	#200
 	; backup ints
@@ -116,15 +125,16 @@ TimerCycle =: .+2
 	mov	#740, @#177706
 	mov	#20, @#177712			; start timer, max speed
 
-;	; set joystick bad bits
-;	clr	@#177714			; turn off mouse?
-;	clr	JoyBadBits
-;	clr	R0
-;	bis	@#177714, JoyBadBits
-;	sob	R0, .-6
+	; set joystick bad bits
+	clr	@#177714			; turn off mouse?
+JoyBadBits =: .+2
+	clr	#000000
+	clr	R0
+	bis	@#177714, JoyBadBits
+	sob	R0, .-6
 
-Stop:	; stop key goes here 
-	; (!) mutable SP addr
+; stop key goes here 
+Stop:	; (!) mutable SP addr
 	mov	#1000, SP
 	mov	#200, @#177716			; speaker DC to low (not high?)
 	; clear ram to 100000
@@ -147,7 +157,7 @@ Stop:	; stop key goes here
 	br	MainCycle
 
 
-; exit to somewhere
+; exit to somewhere (presumable andos)
 Exit:	call	FadeScreen
 	mov	#1330, @#177664
 	; restore ints
@@ -224,7 +234,6 @@ MainGame:
 	bit	#1, FrameCount
 	bne	10$
 	call	BabyPrepare
-	call	BabyDraw
 	call	BabyProcess
 	call	MusicPlay
 	return
@@ -256,9 +265,9 @@ BabyObjTbl:
 	.word	C_AI_OBJOUT, C_SPR_OBJ1
 	.word	C_AI_WALKOUT, C_SPR_BABY1
 	.word	C_AI_WALKOUT, C_SPR_BABY1
+	.word	C_AI_WALKOUT, C_SPR_BABY2
 	.word	C_AI_WALKOUT, C_SPR_BABY1
-	.word	C_AI_WALKOUT, C_SPR_BABY1
-	.word	C_AI_OBJOUT, C_SPR_OBJ1
+	.word	C_AI_OBJOUT, C_SPR_OBJ2
 
 ; prepare another baby (set as walking out of window)
 BabyPrepare:
@@ -323,16 +332,6 @@ LastWindowY =: .+2
 99$:	return
 
 
-; draw babies
-BabyDraw:
-	mov	#Babies, R5
-	call	DrawBaby
-	add	#C_BABY_LEN, R5
-	call	DrawBaby
-	add	#C_BABY_LEN, R5
-	jmp	DrawBaby
-
-
 ; process babies
 BabyProcess:
 	mov	#Babies, R5
@@ -344,8 +343,7 @@ BabyProcess:
 	asl	R0
 	jmp	@BabyProcTbl(R0)
 
-BabyProcTbl:	.word	RetAdr, BabyWalkout, BabyJump, BabyFall, BabyBoom
-		.word	ObjOut, ObjFall
+BabyProcTbl:	.word	RetAdr, BabyWalkout, BabyJump, BabyFall, BabyBoom, ObjOut, ObjFall, FireOut
 
 
 ; slow walk out of window
@@ -354,7 +352,48 @@ BabyWalkout:
 	cmp	C_BABY_X(R5), #32.*400
 	blt	99$				; (!) not BLO here
 	mov	#C_AI_JUMP, (R5)		; set new AI to jump
+	call	FireAdd				; maybe add fire
+99$:	jmp	DrawBaby
+
+
+; trying to add fire if we have empty baby slot
+; R5 - current baby addr
+FireAdd:
+	mov	#Babies, R0
+	tst	(R0)
+	beq	10$
+	add	#C_BABY_LEN, R0
+	tst	(R0)
+	beq	10$
+	add	#C_BABY_LEN, R0
+	tst	(R0)
+	bne	99$
+10$:	mov	#C_AI_FIRE, (R0)+
+	clr	(R0)+
+	mov	C_BABY_Y(R5), (R0)		; (!) using baby's 'sprite' as Y for fire
+	clrb	(R0)
+	swab	(R0)
 99$:	return
+
+
+; drawing fire
+FireOut:
+	mov	C_BABY_AIPAR(R5), R0
+	inc	C_BABY_AIPAR(R5)
+	movb	FireSprTbl(R0), R0
+	bpl	10$
+	; remove fire
+	clr	(R5)
+09$:	return
+10$:	; draw fire
+	mov	#16., R1			; fire X
+	mov	C_BABY_SPRITE(R5), R2
+	jmp	DrawTile
+
+FireSprTbl:	.byte	C_SPR_FIRE1, C_SPR_FIRE1, C_SPR_FIRE1+1, C_SPR_FIRE1+1
+		.byte	C_SPR_FIRE1, C_SPR_FIRE1, C_SPR_FIRE1+1, C_SPR_FIRE1+1
+		.byte	C_SPR_FIRE1, C_SPR_FIRE1, C_SPR_FIRE1+1, C_SPR_FIRE1+1
+		.byte	0, 377
 
 
 ; baby jumping
@@ -407,7 +446,8 @@ BabyDead =: .
 	mov	#ZZ, C_BABY_SPRITE(R5)		; 'empty' sprite
 	call	DrawBaby
 	clr	(R5)				; clear AI
-99$:	return
+	return
+99$:	jmp	DrawBaby
 
 
 ; baby falling
@@ -437,16 +477,12 @@ BabyFall:
 	mov	#C_SPR_BOOM1, C_BABY_SPRITE(R5)
 	mov	#C_AI_BOOM, (R5)
 	mov	#20., C_BABY_AIPAR(R5)		; length of boom
+	jmp	DrawBaby
 90$:	; decrease velocity if it's way too much
 	mov	C_BABY_DY(R5), R0
-	cmp	R0, #12.*400
+	cmp	R0, #10.*400
 	blo	BabyRight
-	mov	R0, R1
-	add	R0, R1
-	add	R0, R1
-	asr	R1
-	asr	R1
-	mov	R1, C_BABY_DY(R5)
+	mov	#10.*400, C_BABY_DY(R5)
 	br	BabyRight
 
 
@@ -454,10 +490,10 @@ BabyFall:
 BabyBoom:
 	dec	C_BABY_AIPAR(R5)
 	bmi	BabyDead
-	cmp	C_BABY_AIPAR(R5), #16.
+	cmp	C_BABY_AIPAR(R5), #12.
 	bne	99$
 	add	#^B0000001000000000, C_BABY_X(R5)	; add 2 to X (to switch sprite)
-99$:	return
+99$:	jmp	DrawBaby
 
 
 ; object out of window
@@ -472,13 +508,13 @@ ObjOut:
 	mov	R0, C_BABY_DX(R5)
 	; dy
 	mov	#20, C_BABY_DY(R5)
-99$:	return
+99$:	jmp	DrawBaby
 
 
 ; object going right
 ObjRight:
 	add	C_BABY_DX(R5), C_BABY_X(R5)
-	return
+	jmp	DrawBaby
 
 
 ; london bridge is falling down..
@@ -504,10 +540,10 @@ ObjFall:
 	; stick to bottom and switch to boom
 	mov	#C_FLO_BABY_Y, C_BABY_Y(R5)
 80$:	bic	#^B0000001111111111, C_BABY_X(R5)	; set X to be 4-pix aligned
-	mov	#C_SPR_OBJBOO1, C_BABY_SPRITE(R5)
+	add	#2, C_BABY_SPRITE(R5)		; switch sprite to 'boom obj'
 	mov	#C_AI_BOOM, (R5)
 	mov	#20., C_BABY_AIPAR(R5)		; length of boom
-	return
+	jmp	DrawBaby
 
 
 ; check if at medic's stretcher
@@ -632,7 +668,7 @@ MedCoordsCorrect:
 ; draw them
 MedicsDraw:
 	; 1st medic
-	mov	#C_MEDIC10_SPR, R0
+	mov	#C_SPR_MEDIC10, R0
 MedicX =: .+2
 	mov	#C_MEDIC_X, R1
 MedicY =: .+2
@@ -640,7 +676,7 @@ MedicY =: .+2
 	clrb	R1
 	swab	R1				; X is fixed point 
 	call	DrawSprite
-	mov	#C_MEDIC11_SPR, R0
+	mov	#C_SPR_MEDIC11, R0
 	mov	MedicX, R1
 	mov	MedicY, R2
 	clrb	R1
@@ -653,7 +689,7 @@ MedicY =: .+2
 	clr	MedDiffXAdd
 	call	DrawMedDiff
 	; stretcher
-	mov	#C_STRETCH_SPR, R0
+	mov	#C_SPR_STRETCH, R0
 	mov	MedicX, R1
 	mov	MedicY, R2
 	clrb	R1
@@ -662,14 +698,14 @@ MedicY =: .+2
 	add	#16., R2
 	call	DrawSprite
 	; 2nd medic
-	mov	#C_MEDIC20_SPR, R0
+	mov	#C_SPR_MEDIC20, R0
 	mov	MedicX, R1
 	mov	MedicY, R2
 	clrb	R1
 	swab	R1
 	add	#32., R1
 	call	DrawSprite
-	mov	#C_MEDIC21_SPR, R0
+	mov	#C_SPR_MEDIC21, R0
 	mov	MedicX, R1
 	mov	MedicY, R2
 	clrb	R1
