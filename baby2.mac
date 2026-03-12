@@ -87,7 +87,14 @@ P_KEY_UP	=: 001
 P_KEY_RIGHT	=: 002
 P_KEY_DOWN	=: 004
 P_KEY_LEFT	=: 010
-P_KEY_FIRE	=: 060 ; 2 buttons 'fire' (40) and 'key A' (20)
+P_KEY_FIRE	=: 060 				; 2 buttons 'fire' (40) and 'key A' (20)
+
+; sounds
+C_SND_BOOM	=: 01
+C_SND_DIRT	=: 06
+C_SND_JUMP	=: 05
+C_SND_REFLECT	=: 03
+C_SND_INSIDE	=: 04
 
 
 ; main entry point
@@ -259,6 +266,8 @@ MainMenu:
 20$:	; 2 - set music type
 	cmp	R0, #'2
 	bne	10$
+	mov	#C_SND_DIRT, R0
+	call	PlaySound
 	inc	MusicType
 	cmp	MusicType, #2
 	blos	22$
@@ -410,6 +419,8 @@ BabyWalkout:
 	blt	99$				; (!) not BLO here
 	mov	#C_AI_JUMP, (R5)		; set new AI to jump
 	call	FireAdd				; maybe add fire
+	mov	#C_SND_JUMP, R0
+	call	PlaySound			; simple jump sound
 99$:	jmp	DrawBaby
 
 
@@ -499,6 +510,8 @@ BabyRight:
 	cmp	R0, #40.*400
 	bhi	99$
 	; it is
+	mov	#C_SND_INSIDE, R0
+	call	PlaySound
 BabyDead =: .
 	mov	#ZZ, C_BABY_SPRITE(R5)		; 'empty' sprite
 	call	DrawBaby
@@ -524,6 +537,8 @@ BabyFall:
 	bcs	10$
 	; at stretcher - switch to jump
 	mov	#C_AI_JUMP, (R5)
+	mov	#C_SND_REFLECT, R0
+	call	PlaySound
 	br	90$
 10$:	; check if at real bottom
 	cmp	C_BABY_Y(R5), #C_FLO_BABY_Y
@@ -534,6 +549,8 @@ BabyFall:
 	mov	#C_SPR_BOOM1, C_BABY_SPRITE(R5)
 	mov	#C_AI_BOOM, (R5)
 	mov	#20., C_BABY_AIPAR(R5)		; length of boom
+	mov	#C_SND_BOOM, R0
+	call	PlaySound
 	jmp	DrawBaby
 90$:	; decrease velocity if it's way too much
 	mov	C_BABY_DY(R5), R0
@@ -600,6 +617,8 @@ ObjFall:
 	add	#2, C_BABY_SPRITE(R5)		; switch sprite to 'boom obj'
 	mov	#C_AI_BOOM, (R5)
 	mov	#20., C_BABY_AIPAR(R5)		; length of boom
+	mov	#C_SND_BOOM, R0
+	call	PlaySound
 	jmp	DrawBaby
 
 
@@ -1337,6 +1356,69 @@ CleanTilemap:
 	sob	R1, 10$
 	return
 
+
+; play sound (R0 - #)
+PlaySound:
+	asl	R0
+	beq	99$
+	mov	SoundTable(R0), R0
+10$:	mov	(R0)+, R3
+	beq	99$
+	asr	R3
+	asr	R3
+	mov	#220, @#177716
+	sob	R3, .
+	mov	(R0)+, R3
+	beq	99$
+	asr	R3
+	asr	R3
+	mov	#320, @#177716
+	sob	R3, .
+	br	10$
+99$:	mov	#220, @#177716
+	return
+
+; DAMN I HATE MAKING 1-BIT SOUNDS - SO THEY ARE FROM BOLDER DASH
+
+; Data was taken from UKNC version - so here are words instead of bytes
+SoundTable:
+	.word	0, Sound001, Sound002, Sound003, Sound004, Sound005, Sound006
+
+	.radix	10
+; boom
+Sound001:
+	.word	859, 506, 511, 507, 1527, 510, 508, 509, 509, 1526, 510, 1017, 510, 2033, 1021
+	.word	1015, 1529, 2002, 495, 491, 1973, 494, 984, 495, 984, 988, 968, 480, 475, 1909, 1431
+	.word	478, 1906, 1879, 4004, 2230, 1826, 497, 2460, 1484, 490, 496, 1475, 990, 919, 926, 458
+	.word	2307, 462, 921, 463, 460, 462, 921, 1242, 413, 827, 414, 413, 1240, 1654, 827, 2097
+	.word	863, 855, 433, 855, 1291, 428, 431, 428, 430, 429, 859, 429, 1383, 1384, 1383, 924
+	.word	0
+; ticks (step on space)
+Sound002:
+	.word	60,60,0
+; boulder
+Sound003:
+	.word	81, 65, 87, 65, 146, 59, 66, 61, 102, 61, 88, 66, 86, 67, 100, 40
+	.word	488, 2352, 1432, 1096, 544, 520, 528, 496, 1160, 520, 536, 363
+	.word	0
+; diamond
+Sound004:
+	.word	216, 184, 192, 184, 184, 192, 184, 192, 176, 200, 176, 208
+	.word	168, 216, 160, 224
+	.word	0
+; emerging
+Sound005:
+	.word	14, 84, 57, 89, 63, 95, 74, 97, 85, 105, 90, 112, 101, 116, 109
+	.word	122, 118, 128, 125, 136, 134, 141, 142, 148, 149, 156, 157, 162, 164, 169, 172
+	.word	176, 96
+	.word	0
+; dirt
+Sound006:
+	.word	194, 79, 37, 26, 75, 25, 210
+	.word	41, 37, 76, 26, 52
+	.word	0
+
+	.radix	8
 
 ; //////////////////////////////////////////////////////////////////////////////
 ; // Data
