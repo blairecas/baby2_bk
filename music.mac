@@ -496,13 +496,13 @@ REG_OUT_VI53:
 	mov	R5, R3
 	add	#AY_AMPLITUDEA, R3		; R3 - reg #7 addr
 	; channel A
-	mov	#0*256.+C_VI53_1, R2
+	mov	#0*256.+C_VI53_12, R2
 	call	PT3_VI53_SET
 	; channel B
 	mov	#1*256.+C_VI53_12, R2
 	call	PT3_VI53_SET
 	; channel C
-	mov	#2*256.+C_VI53_2, R2
+	mov	#2*256.+C_VI53_12, R2
 
 PT3_VI53_SET:
 	; check mixer
