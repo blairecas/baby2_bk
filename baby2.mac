@@ -219,8 +219,11 @@ MainMenuInit:
 	call	FadeScreen
 	clr	PpuKeys
 	; image
-	mov	#MenuData, R0
-	mov	#40.*C_SCRWID+C_VADDR, R1
+	mov	#MenuData1, R0
+	mov	#50.*C_SCRWID+C_VADDR, R1
+	call	Unpack
+	mov	#MenuData2, R0
+	mov	#245.*C_SCRWID+C_VADDR, R1
 	call	Unpack
 	; line of
 	mov	#C_MENU_Y-7.*C_SCRWID+C_MENU_X+C_VADDR, R0
