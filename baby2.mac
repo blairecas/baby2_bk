@@ -214,6 +214,7 @@ MainCycleTbl:	.word	MainMenuInit, MainMenu, MainInit, MainGame
 MainMenuInit:
 	call	MusicMute
 	call	FadeScreen
+	clr	PpuKeys
 	; line of
 	mov	#C_MENU_Y-7.*C_SCRWID+C_MENU_X+C_VADDR, R0
 	call	BlueLine
