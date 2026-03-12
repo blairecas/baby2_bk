@@ -9,7 +9,7 @@ C_RAM_BANKS54	=: ^B0001110000000000
 
 C_VADDR		=: 40000
 C_SCRWID	=: 100
-C_MENU_Y	=: 120.
+C_MENU_Y	=: 130.
 C_MENU_X	=: 9.
 
 C_WINDOW_Y1	=: 03.*16.
@@ -218,6 +218,10 @@ MainMenuInit:
 	call	MusicMute
 	call	FadeScreen
 	clr	PpuKeys
+	; image
+	mov	#MenuData, R0
+	mov	#40.*C_SCRWID+C_VADDR, R1
+	call	Unpack
 	; line of
 	mov	#C_MENU_Y-7.*C_SCRWID+C_MENU_X+C_VADDR, R0
 	call	BlueLine
@@ -1491,6 +1495,51 @@ SetJoyKey:
 	return					; return from routine above
 
 
+; R0 = next byte after the source data
+; R1 = next byte after the decompressed data
+; registers used: all (R0-R5)
+Unpack:	clr	R2
+	movb	#200,R3
+	sxt	R5
+10$:	call	50$
+	movb	(R0)+,(R1)+
+	sob	R2,.-2
+	aslb	R3
+	bcs	30$
+	call	50$
+20$:	mov	R1,R4
+	add	R5,R4
+	movb	(R4)+,(R1)+
+	sob	R2,.-2
+	aslb	R3
+	bcc	10$
+30$:	bisb	#376,R2
+	call	60$
+	incb	R2
+	bne	.+4
+40$:	return
+	swab	R2
+	clrb	R2
+	mov	R2,R5
+	bisb	(R0)+,R5
+	sec
+	ror	R5
+	mov	#1,R2
+	bcs	.+6
+	call	80$
+	inc	R2
+	br	20$
+50$:	incb	R2
+60$:	aslb	R3
+	bne	70$
+	movb	(R0)+,R3
+	rolb	R3
+70$:	bcs	40$
+80$:	aslb	R3
+	rol	R2
+	br	60$
+
+
 ; play sound (R0 - #)
 PlaySound:
 	asl	R0
@@ -1595,6 +1644,8 @@ Babies:		.blkb	C_BABY_COUNT*C_BABY_LEN
 
 @include font.mac
 @include bgr.mac
+@include menu.mac
+	.even
 
 ; //////////////////////////////////////////////////////////////////////////////
 ; // Includes
