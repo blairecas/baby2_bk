@@ -260,12 +260,12 @@ MainMenu:
 	; 1 - setup joystick
 	cmp	R0, #'1
 	bne	20$
-;	call	JoySetup
+	call	JoySetup
 	clr	CurrentMode
 	return
 20$:	; 2 - set music type
 	cmp	R0, #'2
-	bne	10$
+	bne	30$
 	mov	#C_SND_DIRT, R0
 	call	PlaySound
 	inc	MusicType
@@ -274,6 +274,10 @@ MainMenu:
 	clr	MusicType
 22$:	call	PrintMusicType
 	br	10$
+30$:	; 0 - exit
+	cmp	R0, #'0
+	bne	10$
+	jmp	Exit
 90$:	; start
 	inc	CurrentMode
 	return
@@ -1339,10 +1343,24 @@ PpuKeys =: .+2
 
 ; keyboard check
 KeysCheck:
+	; joy
+	mov	@#177714, R0			; get joy bits
+	bic	JoyBadBits, R0			; clear bad ones
+	; if we redefined joy bits - set them 
+	clr	R2				; bits from joy
+	mov	#JoyReTable, R1
+02$:	bit	R0, (R1)+
+	beq	04$
+	bis	(R1), R2
+04$:	tst	(R1)+
+	cmp	R1, #JoyReTableEnd
+	blo	02$
+	; now in R2 are bits from joy
 	bit	#100, @#177716			; any key pressed?
 	beq	10$				; yes
 	clr	PpuKeys
-10$:	return
+10$:	bis	R2, PpuKeys
+	return
 
 
 ; clean some data from background tilemap
@@ -1355,6 +1373,60 @@ CleanTilemap:
 	add	#16.-8., R0
 	sob	R1, 10$
 	return
+
+
+; setup joy redefine table
+JoySetup:
+	call	FadeScreen
+	mov	#10.*C_SCRWID+2+C_VADDR, PrintVaddr
+	mov	#MsgJoy000, R0
+	call	Print
+	call	Print
+	add	#10.*C_SCRWID, PrintVaddr
+	; for double press detection
+JoyTempDD =: .+2
+	clr	#000000
+	mov	#JoyReTable, R5
+	mov	#5, R4
+10$:	call	Print
+	call	SetJoyKey
+	sob	R4, 10$
+	return
+
+; wait for joy input (or keypress)
+; R5 - where to put it
+; return R5 - where to put next
+SetJoyKey:
+	mov	JoyTempDD, R2
+	; wait for press
+10$:	bit	#100, @#177716
+	beq	90$
+	mov	@#177714, R1
+	bic	JoyBadBits, R1
+	beq	10$
+	; check for double press
+	bis	R1, R2
+	cmp	JoyTempDD, R2
+	beq	10$
+	; update JoyReTable
+	mov	R1, (R5)+
+	; wait for release
+20$:	bit	#100, @#177716
+	beq	90$
+	mov	@#177714, R1
+	bic	JoyBadBits, R1
+	bne	20$
+	mov	R2, JoyTempDD
+	tst	(R5)+
+	return
+90$:	; restore defaults
+	mov	#JoyReTableEnd, R5
+	mov	#5, R3
+	mov	-(R5), -(R5)
+	sob	R3, .-2
+	clr	KeyCur
+	tst	(SP)+				; remove call
+	return					; return from routine above
 
 
 ; play sound (R0 - #)
@@ -1431,6 +1503,13 @@ MsgMenuSt:	.asciz	<1>"NAVMITE "<2>"PROBEL"<1>" DLQ ZAPUSKA"
 MsgMusicOff:	.asciz	<2>"WYKL      "
 MsgMusicAy:	.asciz	<2>"QMAHA     "
 MsgMusicMen:	.asciz	<2>"MENESTRELX"
+MsgJoy000:	.asciz	<2>"NASTROJKA DVOISTIKA"
+MsgJoy001:	.asciz	<1>"NAVMITE PROBEL DLQ WYHODA"
+MsgJoy002:	.asciz	<3>"NAVMITE WWERH"
+MsgJoy003:	.asciz	<3>"NAVMITE WPRAWO"
+MsgJoy004:	.asciz	<3>"NAVMITE WNIZ"
+MsgJoy005:	.asciz	<3>"NAVMITE WLEWO"
+MsgJoy006:	.asciz	<3>"NAVMITE OGONX"
 		.even
 MsgMusicTbl:	.word	MsgMusicOff, MsgMusicAy, MsgMusicMen
 
@@ -1440,6 +1519,13 @@ KeyToPpu:	.word	C_KEY_LEFT,  P_KEY_LEFT
 		.word	C_KEY_DOWN,  P_KEY_DOWN
 		.word	C_KEY_SPACE, P_KEY_FIRE
 KeyToPpuEnd:
+
+JoyReTable:	.word	P_KEY_UP,    P_KEY_UP
+JoyReTableR:	.word	P_KEY_RIGHT, P_KEY_RIGHT
+JoyReTableD:	.word	P_KEY_DOWN,  P_KEY_DOWN
+JoyReTableL:	.word	P_KEY_LEFT,  P_KEY_LEFT
+JoyReTableF:	.word	P_KEY_FIRE,  P_KEY_FIRE
+JoyReTableEnd:
 
 
 BabiesYTbl:	.byte	C_WINDOW_Y1-20, C_WINDOW_Y2-20, C_WINDOW_Y3-20, C_WINDOW_Y2-20
