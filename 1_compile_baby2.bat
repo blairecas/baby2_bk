@@ -6,6 +6,8 @@ rem echo Graphics
 rem echo ===========================================================================
 php -f ./graphics/convert_bgr.php
 if %ERRORLEVEL% NEQ 0 ( exit /b )
+php -f ./graphics/convert_font.php
+if %ERRORLEVEL% NEQ 0 ( exit /b )
 
 echo.
 echo ===========================================================================

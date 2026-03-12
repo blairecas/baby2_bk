@@ -1,3 +1,21 @@
+; //////////////////////////////////////////////////////////////////////////////
+; VI53 in Menestrel
+; //////////////////////////////////////////////////////////////////////////////
+
+; 177714 (data inverted)
+; GA XX XX WR CS CS A1 A0 - XX XX XX XX XX XX XX XX
+;             D2 D1         C1 C0 L1 L0 M2 M1 M0 BC
+;  GA - gates open
+; ~CS - chip select (0-selected)
+; ~WR - write (0-write)
+; control word: L0=L1=1 - LSB mode
+;               C0,C1 - counter select 0..2
+;               M0,M1,M2 - mode select (usually mode 3)
+;               BC=0 - usual 16-bit (1 - binary coded decimal)
+C_VI53_1	=: ^B1000100000000000
+C_VI53_2	=: ^B1000010000000000
+C_VI53_12	=: ^B1000000000000000
+C_VI53_NONE	=: ^B1000110000000000
 
 ; Based on:
 ; CSI MultiPlayer 3 for CSIDOS by KUVO
@@ -98,11 +116,8 @@ INTEGRATION_POINTS:
 	TS_PRESENT:		.word 0 				; TS sign
 	SEL_DEVICE:		.word 0 				; Auto selected device: 0 - legacy AY/YM or TurboSound or GryphonSound, 1 - AZBK 
 	PARAMETERS_AY1_ADDR:	.word PARAMETERS_AY1 			; Address of the operating parameters of AY1
-	PARAMETERS_AY2_ADDR:	.word PARAMETERS_AY2 			; Address of the operating parameters of AY2
 	AYREGS_AY1:		.word PARAMETERS_AY1 + PARAM_AYREGS	; Address of last sent AY1 register values
-	AYREGS_AY2:		.word PARAMETERS_AY2 + PARAM_AYREGS	; Address of last sent AY2 register values
 	PT3FILE_MODULE1_ADDR:	.word M_Music1				; PT3 file address
-	PT3FILE_MODULE2_ADDR:	.word 0 				; Address of module 2 (TS) in PT3 file 
 	PT3FILE_END_ADDR:	.word M_Music1End			; Address of end PT3 file
 	END_OF_PT3FILE:		.word 0 				; End of PT3 file reached (incremented by one each time)
 	NO_REPEAT_MODE:		.word 0 				; Play without repeat
@@ -110,24 +125,10 @@ INTEGRATION_POINTS:
 	CUR_PARAMS_ADDR:	.word 0
 
 
-; TS check
-TS_ID:	.ascii	"PT3!PT3!02TS"
-TS_ID_END:
-TS_ID_CHECK:
-	mov	#4, R4
-10$:	cmpb	-(R0), -(R2)
-	bne	11$
-	sob	R4, 10$
-11$:	return
-
-NoTS:	.word	0
-
 ; Initialization of pt3 module 
 ; R0 = song #
 ; R1 = 0 - repeat, 1 - no repeat
-Init:	clr	NoTS				; prevent TS detect flag
-	asl	R0
-	rol	NoTS
+Init:	asl	R0
 	asl	R0
 	mov	MusicTable(R0), PT3FILE_MODULE1_ADDR
 	mov	MusicTable+2(R0), PT3FILE_END_ADDR
@@ -145,11 +146,9 @@ Init:	clr	NoTS				; prevent TS detect flag
 	mov	#240, REG_OUT_DEVICE_MANAGE 	; NOP code = 240
 20$:	; AZ device detect ends here
 
-	clr	TS_PRESENT 
 	clr	SEL_DEVICE
 	clr	FRAME_NUMBER
 	clr	END_OF_PT3FILE
-	clr	PT3FILE_MODULE2_ADDR 
 	clr	REPETITION_NUMBER
 
 	mov	#PARAM_DEVICES_AY1, R3	
@@ -157,39 +156,6 @@ Init:	clr	NoTS				; prevent TS detect flag
 	mov	#100000, (R3)+			; gsound #1
 	mov	#AY_1_PORT_AZBK, (R3)+		; AZBK #1
 	mov	PT3FILE_MODULE1_ADDR, R1
-
-	; prevent TS detect?	
-	tst	NoTS
-	bne	InitNext
-
-TS_DETECT:
-	mov	PT3FILE_END_ADDR, R0
-	mov	#TS_ID_END, R2
-	call	TS_ID_CHECK
-	bne	InitNext
-	sub	#2, R0				; SKIP LENGTH OF SECOND MODULE
-	call	TS_ID_CHECK
-	bne	InitNext
-	clr	R5				; GET OFFSET TO SECOND MODULE
-	bisb	-(R0), R5
-	swab	R5
-	bisb	-(R0), R5
-	add	PT3FILE_MODULE1_ADDR, R5 	; GET ADDRESS OF SECOND MODULE
-	call	TS_ID_CHECK
-	bne	InitNext
-
-	; have TS
-	inc	TS_PRESENT
-
-	mov	R5, -(SP)
-	call	InitNext
-	mov	(SP)+, R1
-
-	mov	R1, PT3FILE_MODULE2_ADDR
-	mov	#PARAM_DEVICES_AY2, R3
-	mov	#1, (R3)+			; legacy #2
-	mov	#40000, (R3)+			; gsound #2
-	mov	#AY_2_PORT_AZBK, (R3)+		; AZBK #2 
 
 InitNext:
 	mov	R3, CUR_PARAMS_ADDR
@@ -404,10 +370,6 @@ MULTY_SUBR:
 
 Play:	inc	FRAME_NUMBER
 	mov	#PARAMETERS_AY1, R4
-	tst	TS_PRESENT
-	beq	PlayNext
-	call	PlayNext
-	mov	#PARAMETERS_AY2, R4 
 PlayNext:
 	mov	R4, CUR_PARAMS_ADDR
 	clr	PARAM_ADDTOENVELOPE(R4)
@@ -519,8 +481,60 @@ PlayNext:
 ; ///////////////////////////////////////////////////////////////////////////////
 ; // Device dependent procedure - copy registers to actual AY device (!)
 
-; AY registers ready
 REG_OUT:
+	mov	MusicType, R0
+	asl	R0
+	add	R0, PC
+	nop
+	br	REG_OUT_AY
+
+; MENESTREL!!!111oneone
+REG_OUT_VI53:
+	mov	CUR_PARAMS_ADDR, R5
+	add	#PARAM_AYREGS, R5		; R5 - reg #0 addr
+	movb	AY_MIXER(R5), R4		; R4 - mixer byte
+	mov	R5, R3
+	add	#AY_AMPLITUDEA, R3		; R3 - reg #7 addr
+	; channel A
+	mov	#0*256.+C_VI53_1, R2
+	call	PT3_VI53_SET
+	; channel B
+	mov	#1*256.+C_VI53_12, R2
+	call	PT3_VI53_SET
+	; channel C
+	mov	#2*256.+C_VI53_2, R2
+
+PT3_VI53_SET:
+	; check mixer
+	mov	R4, R0 ; nois -+  +- tone
+	bic	#^B1111111111110110, R0
+	cmp	#^B0000000000001000, R0		; noise must be off, tone must be on
+	bne	10$				; if not - silence channel
+	; check fixed amplitude
+	cmpb	(R3), #10
+	blos	10$
+	; what to do with amplitude envelope? (nothing I guess)
+	; note on
+	clr	R1
+	bisb	(R5)+, R1
+	swab	R1
+	bisb	(R5)+, R1
+	swab	R1	
+	asl	R1
+	asl	R1
+	asl	R1
+	br	90$
+10$:	; note off
+	mov	#2, R1
+	inc	R5
+	inc	R5
+90$:	asr	R4				; next channel in mixer
+	inc	R3				; next amplitude reg
+	jmp	SetNot
+
+
+; AY registers ready
+REG_OUT_AY:
 	mov	CUR_PARAMS_ADDR, R0			; params addr where -2 word have our AY device address
 	mov	R0, R4					; skip to AY actual registers bytes
 	mov	-(R0), AY_PORT_AZBK+2
@@ -567,15 +581,73 @@ GS_SELECTOR:	.word	0
 	return 
 
 MUTE:	inc	END_OF_PT3FILE				; just in case
+	cmp	MusicType, #1
+	beq	MUTE_AY
+	cmp	MusicType, #2
+	beq	IniVis
+	return
+
+; mute ay
+MUTE_AY:
 	mov	#PARAMETERS_AY1, R4
-	call	MUTE_NEXT
-	mov	#PARAMETERS_AY2, R4
 MUTE_NEXT:
 	mov	R4, CUR_PARAMS_ADDR
 	clr	PARAM_AYREGS + AY_AMPLITUDEA(R4)
 	clrb	PARAM_AYREGS + AY_AMPLITUDEC(R4)
 	movb	#77, PARAM_AYREGS + AY_MIXER(R4)
 	br	REG_OUT
+
+; init VI53 counters
+IniVis:	mov	#177714, R0
+	mov	#^C^B0000001100110110, (R0)	; both chips, counter 0, mode 3 (~WR low)
+	mov	#^C^B0001001100110110, (R0)	; ~WR high
+	mov	#^C^B0000001101110110, (R0)
+	mov	#^C^B0001001101110110, (R0)
+	mov	#^C^B0000001110110110, (R0)
+	mov	#^C^B0001001110110110, (R0)
+	return
+
+; R1 - divisor, R2 - channel (upper byte)
+; info: on real VI53 you barely able to hear anything with divisor lower than 10 (except harmonics at very low level)
+;       but here to be GID-compatible (tm) we will reinit counter instead
+SetNot: ; compare with previous divisor and do nothing if not changing
+	mov	R2, R0
+	clrb	R0
+	swab	R0
+	bic	#^B1111111111111100, R0
+	asl	R0
+	cmp	R1, VI53PrevDivs(R0)
+	bne	02$
+	return
+02$:	mov	R1, VI53PrevDivs(R0)
+	mov	R2, R0
+	; assume that divisor lower than 10(8) is silence
+	cmp	#10, R1
+	blo	10$
+	; silence channel then
+	mov	R0, R1
+	asr	R0
+	asr	R0
+	bis	R1, R0
+	bic	#^B1111001100111111, R0
+	bis	#^B1000001100110110, R0
+	br	Out14
+10$:	; normal frequency
+	bisb	R1, R0
+	swab	R1
+	call	Out14
+	clrb	R0
+	bisb	R1, R0
+; set inverted R0 to 177714
+Out14:	com	R0
+	bis	#^B0001000000000000, R0		; ~WR low
+	mov	R0, @#177714
+	bic	#^B0001000000000000, R0		; ~WR high
+	mov	R0, @#177714
+	com	R0
+	return
+
+VI53PrevDivs:	.word	0, 0, 0
 
 ; /////////////////////////////////////////////////////////////////////////////
 
@@ -1106,9 +1178,3 @@ PARAM_DEVICES_AY1:
 PARAMETERS_AY1:
 	.blkb	PARAM_SIZE
 	.even
-PARAM_DEVICES_AY2:
-	.word	0, 0, 0
-PARAMETERS_AY2:
-	.blkb	PARAM_SIZE
-	.even
-

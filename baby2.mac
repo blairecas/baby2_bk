@@ -9,6 +9,8 @@ C_RAM_BANKS54	=: ^B0001110000000000
 
 C_VADDR		=: 40000
 C_SCRWID	=: 100
+C_MENU_Y	=: 120.
+C_MENU_X	=: 9.
 
 C_WINDOW_Y1	=: 03.*16.
 C_WINDOW_Y2	=: 07.*16.
@@ -137,6 +139,7 @@ JoyBadBits =: .+2
 Stop:	; (!) mutable SP addr
 	mov	#1000, SP
 	mov	#200, @#177716			; speaker DC to low (not high?)
+	call	MusicMute			; mute anything ASAP
 	; clear ram to 100000
 	mov	#End, R0
 	clr	(R0)+
@@ -204,12 +207,65 @@ MainCycleTbl:	.word	MainMenuInit, MainMenu, MainInit, MainGame
 MainMenuInit:
 	call	MusicMute
 	call	FadeScreen
+	; line of
+	mov	#C_MENU_Y-7.*C_SCRWID+C_MENU_X+C_VADDR, R0
+	call	BlueLine
+	; 1 - joy
+	call	PrintSp
+	.word	C_MENU_Y*C_SCRWID+C_MENU_X+C_VADDR
+	.word	MsgMenu01
+	; 2 - music
+	call	PrintSp
+	.word	C_MENU_Y+11.*C_SCRWID+C_MENU_X+C_VADDR
+	.word	MsgMenu02
+	call	PrintMusicType
+	; 0 - quit
+	call	PrintSp
+	.word	C_MENU_Y+22.*C_SCRWID+C_MENU_X+C_VADDR
+	.word	MsgMenu00
+	; line of
+	mov	#C_MENU_Y+33.*C_SCRWID+C_MENU_X+C_VADDR, R0
+	call	BlueLine
+	; space - start
+	call	PrintSp
+	.word	C_MENU_Y+50.*C_SCRWID+5.+C_VADDR
+	.word	MsgMenuSt
 	inc	CurrentMode
 	return
+
+PrintMusicType:
+	mov	#C_MENU_Y+11.*C_SCRWID+C_MENU_X+22.+C_VADDR, PrintVaddr	
+	mov	MusicType, R0
+	asl	R0
+	add	#MsgMusicTbl, R0
+	mov	(R0), R0
+	jmp	Print
 
 
 ; main menu
 MainMenu:
+10$:	call	KeysCheck
+	bit	#P_KEY_FIRE, PpuKeys
+	bne	90$
+	mov	KeyCur, R0
+	beq	10$
+	clr	KeyCur
+	; 1 - setup joystick
+	cmp	R0, #'1
+	bne	20$
+;	call	JoySetup
+	clr	CurrentMode
+	return
+20$:	; 2 - set music type
+	cmp	R0, #'2
+	bne	10$
+	inc	MusicType
+	cmp	MusicType, #2
+	blos	22$
+	clr	MusicType
+22$:	call	PrintMusicType
+	br	10$
+90$:	; start
 	inc	CurrentMode
 	return
 
@@ -230,19 +286,20 @@ MainInit:
 
 ; main game cycle
 MainGame:
-	; babies on even frame
+	call	MusicPlay
+	; check timer - if music went too much - skip frame
+	; (!) music 50Hz is a TOP PRIORITY here
+	cmp	@#177710, #360
+	blo	02$
+02$:	; babies on even frame
 	bit	#1, FrameCount
 	bne	10$
 	call	BabyPrepare
-	call	BabyProcess
-	call	MusicPlay
-	return
+	jmp	BabyProcess
 10$:	; medics on odd frame
 	call	KeysCheck
 	call	MedicsDraw
-	call	MedicsProcess
-	call	MusicPlay
-	return
+	jmp	MedicsProcess
 
 
 ; //////////////////////////////////////////////////////////////////////////////
@@ -1051,28 +1108,122 @@ ComputeVaddr:
 	return
 
 
+; mask words for coloring
+PriColorsTbl:	.word	^B1111111111111111, ^B1010101010101010, ^B0101010101010101, ^B0000000000000000
+
+; unpack font byte R4 -> font word R4
+UnpFont:
+	mov	R0, -(SP)
+	mov	R1, -(SP)
+	mov	#8., R1
+	clr	R0
+10$:	rorb	R4
+	bcs	20$
+	ror	R0
+	br	30$
+20$:	ror	R0
+	sec
+30$:	ror	R0
+	sob	R1, 10$
+	mov	R0, R4
+	mov	(SP)+, R1
+	mov	(SP)+, R0
+	return
+
+; print string with addrs after call
+; call PrintSp
+; .word VAddr
+; .word MsgAddr
+PrintSp:
+	mov	(SP), R0
+	mov	(R0)+, PrintVaddr
+	mov	(R0)+, R0
+	call	Print
+	add	#4, (SP)
+	return
+
+; print string
+; R0 - string
+; return R0 - next string addr
+Print:	mov	R1, -(SP)
+	mov	R2, -(SP)
+	mov	R3, -(SP)
+	mov	R4, -(SP)
+	mov	R5, -(SP)
+PrintVaddr =: .+2
+	mov	#40000, R5
+10$:	movb	(R0)+, R1
+	beq	90$
+	cmp	R1, #3.			; is it special symbol
+	bhi	20$
+	; change font color mask
+	asl	R1
+	mov	PriColorsTbl(R1), R3
+	br	10$
+20$:	sub	#'0, R1			; relative to '0'
+	bge	30$
+	mov	#16., R1		; any chars below '0' converted to #16 (here its a space)
+30$:	mov	R1, R2
+	asl	R1			; *7 bytes (character font size)
+	asl	R1
+	asl	R1
+	sub	R2, R1
+FontDataAddr =: .+2
+	add	#FontData, R1		; R1 = font data
+	mov	#7., R2
+40$:	clr	R4
+	bisb	(R1)+, R4
+	call	UnpFont
+	bic	R3, R4
+	movb	R4, (R5)+
+	swab	R4
+	movb	R4, (R5)+
+	; mov	R4, (R5)
+	add	#C_SCRWID-2, R5
+	sob	R2, 40$
+	sub	#C_SCRWID*7.-2, R5	; advance vaddr
+	br	10$
+90$:	add	#10.*C_SCRWID, PrintVaddr
+	mov	(SP)+, R5
+	mov	(SP)+, R4
+	mov	(SP)+, R3
+	mov	(SP)+, R2
+	mov	(SP)+, R1
+	return
+
+
+; just blue line
+; R0 - vaddr
+BlueLine:
+	mov	#^B0100010001000100, R1
+	mov	#23., R2
+	mov	R1, (R0)+
+	sob	R2, .-2
+	return
+
+
 ; //////////////////////////////////////////////////////////////////////////////
 ; // Music
 ; //////////////////////////////////////////////////////////////////////////////
 
 MusicMute:
-NoMusic =: .+2
+MusicType =: .+2
 	tst	#000000
-	beq	10$
+	bne	10$
 	return
 10$:	jmp	Mute
 
 
 MusicInit:
-	tst	NoMusic
-	beq	10$
+	tst	MusicType
+	bne	10$
 	return
 10$:	jmp	Init
 
 
 MusicPlay:
-	tst	NoMusic
-	beq	10$
+	tst	MusicType
+	bne	10$
 	return
 10$:	jmp	Play
 
@@ -1191,6 +1342,16 @@ CleanTilemap:
 ; // Data
 ; //////////////////////////////////////////////////////////////////////////////
 
+MsgMenu01:	.asciz	<2>"1"<1>" ; NASTROITX DVOISTIK"
+MsgMenu02:	.asciz	<2>"2"<1>" ; MUZYKA "
+MsgMenu00:	.asciz	<3>"0"<1>" ; WYHOD"
+MsgMenuSt:	.asciz	<1>"NAVMITE "<2>"PROBEL"<1>" DLQ ZAPUSKA"
+MsgMusicOff:	.asciz	<2>"WYKL      "
+MsgMusicAy:	.asciz	<2>"QMAHA     "
+MsgMusicMen:	.asciz	<2>"MENESTRELX"
+		.even
+MsgMusicTbl:	.word	MsgMusicOff, MsgMusicAy, MsgMusicMen
+
 KeyToPpu:	.word	C_KEY_LEFT,  P_KEY_LEFT
 		.word	C_KEY_RIGHT, P_KEY_RIGHT
 		.word	C_KEY_UP,    P_KEY_UP
@@ -1202,6 +1363,7 @@ KeyToPpuEnd:
 BabiesYTbl:	.byte	C_WINDOW_Y1-20, C_WINDOW_Y2-20, C_WINDOW_Y3-20, C_WINDOW_Y2-20
 Babies:		.blkb	C_BABY_COUNT*C_BABY_LEN
 
+@include font.mac
 @include bgr.mac
 
 ; //////////////////////////////////////////////////////////////////////////////
@@ -1215,7 +1377,7 @@ MusicTable:
 	.word	M_Music1, M_Music1End
 
 M_Music1:
-	@includebin ./music/mast_benny.pt3
+	@includebin ./music/music.pt3
 M_Music1End:
 
 End:
