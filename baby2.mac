@@ -42,6 +42,9 @@ C_SPR_MEDIC11	=: 15
 C_SPR_STRETCH	=: 10
 C_SPR_MEDIC20	=: 06
 C_SPR_MEDIC21	=: 17
+; score
+C_SPR_BABSCO	=: 35
+C_SPR_OBJSCO	=: 36
 
 C_BABY_COUNT	=: 3
 
@@ -294,6 +297,9 @@ MainInit:
 	mov	#0, R0				; song #
 	clr	R1				; repeat it
 	call	MusicInit
+	; scores
+	mov	#040000-4, BabyScoreA
+	mov	#040000+C_SCRWID, ObjScoreA
 	inc	CurrentMode
 	return
 
@@ -314,6 +320,12 @@ MainGame:
 	call	KeysCheck
 	call	MedicsDraw
 	jmp	MedicsProcess
+
+
+; game over
+MainOver:
+	clr	CurrentMode
+	return
 
 
 ; //////////////////////////////////////////////////////////////////////////////
@@ -475,9 +487,9 @@ BabyJump:
 	call	Min4R0toR1
 	sub	R1, C_BABY_Y(R5)
 	; do not fly over screen
-	cmp	C_BABY_Y(R5), #6*400
+	cmp	C_BABY_Y(R5), #16.*400
 	bhis	10$
-	mov	#6*400, C_BABY_Y(R5)
+	mov	#16.*400, C_BABY_Y(R5)
 10$:	mov	R0, R1
 	clr	R2				; DY -> [R2 R1]
 	call	Mul16R2R1
@@ -549,7 +561,10 @@ BabyFall:
 	cmp	C_BABY_Y(R5), #C_FLO_BABY_Y
 	blo	BabyRight
 	; stick to bottom and switch to boom
-	mov	#C_FLO_BABY_Y, C_BABY_Y(R5)
+	cmp	C_BABY_SPRITE(R5), #C_SPR_BABY1
+	bne	20$
+	call	ScoreBaby
+20$:	mov	#C_FLO_BABY_Y, C_BABY_Y(R5)
 	bic	#^B0000001111111111, C_BABY_X(R5)	; set X to be 4-pix aligned
 	mov	#C_SPR_BOOM1, C_BABY_SPRITE(R5)
 	mov	#C_AI_BOOM, (R5)
@@ -611,7 +626,8 @@ ObjFall:
 	; check if at medic's stretcher
 	call	IsStretcher
 	bcs	10$
-	; at stretcher - TODO: we hit medics
+	; at stretcher - we hit medics
+	call	ScoreObj
 	br	80$
 10$:	; check if at real bottom
 	cmp	C_BABY_Y(R5), #C_FLO_BABY_Y
@@ -651,6 +667,32 @@ IsStretcher:
 	tst	(PC)+
 10$:	sec
 	return
+
+
+; draw scored baby 
+ScoreBaby:
+	add	#4, BabyScoreA
+	cmp	BabyScoreA, ObjScoreA
+	blo	10$
+	inc	CurrentMode
+	return
+10$:	mov	#C_SPR_BABSCO, R0
+BabyScoreA =: .+2
+	mov	#040000-4, R1
+	jmp	DrawTile2
+
+
+; draw scored obj
+ScoreObj:
+	sub	#4, ObjScoreA
+	cmp	ObjScoreA, BabyScoreA
+	bhi	10$
+	inc	CurrentMode
+	return
+10$:	mov	#C_SPR_OBJSCO, R0
+ObjScoreA =: .+2
+	mov	#040100-4, R1
+	jmp	DrawTile2
 
 
 ; min(R0, 4*400) -> R1
@@ -1115,6 +1157,25 @@ DrawTile:
 	mov	(SP)+, R3
 	mov	(SP)+, R2
 	mov	(SP)+, R1
+	return
+
+
+; just tile 
+; R0=#, R1=vaddr
+DrawTile2:
+	swab	R0				; (!) must not exceed 127
+	asr	R0
+	asr	R0
+	add	#TilesAddr, R0
+	; drawing cycle
+	mov	#16., R3			; sprite height
+	mov	#C_SCRWID-4., R2		; next line addition	
+20$:	movb	(R0)+, (R1)+
+	movb	(R0)+, (R1)+
+	movb	(R0)+, (R1)+
+	movb	(R0)+, (R1)+
+	add	R2, R1
+	sob	R3, 20$
 	return
 
 
