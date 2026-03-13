@@ -14,7 +14,19 @@ Start:	mov	#1000, SP
 	bne	10$
 	mov	#C_RAM_BANKS54, @#177716	; banks 5 4 (andos standard bank 4 on 100000)
 	clrb	@#177663			; vsync on, screen buf 5, palette 0
-10$: 	; relocate unpacker code to (the top) -40000
+10$: 	; unpack graphics
+	mov	#TitleStart, R0
+	mov	#40000, R1
+	call	DZX0
+	; wait any key
+20$:	bit	#100, @#177716			; any key pressed?
+	bne	20$				; yes
+	; clear screen to signal for user that key was pressed
+	mov	#40000, R0
+	clr	(R0)+
+	tst	R0
+	bpl	.-4
+	; relocate unpacker code to (the top) -40000
 	mov	#Unpack, R0
 	mov	#C_UNP_START, R1
 	mov	#UnpackEnd-Unpack/2, R3
@@ -103,5 +115,10 @@ CpuStart:
 	@includebin baby2_cpu.zx0
 	.even
 CpuEnd:
+
+TitleStart:
+	@include title.mac
+	.even
+TitleEnd:
 
 	.end	Start

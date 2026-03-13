@@ -75,4 +75,7 @@ function ImgWriteData ($fn, $cstr, $ispack, $tdx, $tdy)
     ImgWriteData("menu1.png", "MenuData1", true/*pack*/, -1, -1);
     ImgWriteData("menu2.png", "MenuData2", true/*pack*/, -1, -1);
 
+    $f = fopen(pathinfo(__FILE__, PATHINFO_DIRNAME)."/../title.mac", "w");
+    ImgWriteData("title.png", "TitleData", true/*pack*/, -1, -1);
+
     fclose($f); 
