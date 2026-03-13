@@ -14,7 +14,8 @@ Start:	mov	#1000, SP
 	bne	10$
 	mov	#C_RAM_BANKS54, @#177716	; banks 5 4 (andos standard bank 4 on 100000)
 	clrb	@#177663			; vsync on, screen buf 5, palette 0
-10$: 	; unpack graphics
+10$: 	mov	#1330, @#177664
+	; unpack graphics
 	mov	#TitleStart, R0
 	mov	#40000, R1
 	call	DZX0
