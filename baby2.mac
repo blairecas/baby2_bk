@@ -1598,24 +1598,27 @@ Unpack:	clr	R2
 
 ; play sound (R0 - #)
 PlaySound:
+	; (!) no sounds when music is playing 
+	tst	MusicType
+	bne	99$
 	asl	R0
-	beq	99$
+	beq	90$
 	mov	SoundTable(R0), R0
 10$:	mov	(R0)+, R3
-	beq	99$
+	beq	90$
 	asr	R3
 	asr	R3
 	mov	#220, @#177716
 	sob	R3, .
 	mov	(R0)+, R3
-	beq	99$
+	beq	90$
 	asr	R3
 	asr	R3
 	mov	#320, @#177716
 	sob	R3, .
 	br	10$
-99$:	mov	#220, @#177716
-	return
+90$:	mov	#220, @#177716
+99$:	return
 
 ; DAMN I HATE MAKING 1-BIT SOUNDS - SO THEY ARE FROM BOLDER DASH
 
