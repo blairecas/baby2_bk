@@ -611,7 +611,8 @@ IniVis:	mov	#177714, R0
 ; info: on real VI53 you barely able to hear anything with divisor lower than 10 (except harmonics at very low level)
 ;       but here to be GID-compatible (tm) we will reinit counter instead
 SetNot: ; compare with previous divisor and do nothing if not changing
-	mov	R2, R0
+	; why do that? (because fuck you that why) because you will hear humming sound if set same note every frame in VI53
+	mov	R2, R0				; channel # in our upper byte lowest 2 bits ^_^
 	clrb	R0
 	swab	R0
 	bic	#^B1111111111111100, R0

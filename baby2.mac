@@ -210,7 +210,7 @@ CurrentMode =: .+2
 	call	@MainCycleTbl(R0)		; run procedures
 	br	MainCycle
 
-MainCycleTbl:	.word	MainMenuInit, MainMenu, MainInit, MainGame
+MainCycleTbl:	.word	MainMenuInit, MainMenu, MainInit, MainGame, MainOver
 
 
 ; initialize main menu
@@ -301,6 +301,8 @@ MainInit:
 	call	DrawBackground
 	call	MedicsInit
 	call	MedVelInit
+	clr	SavedBabies
+	clr	SavedCats
 	mov	#0, R0				; song #
 	clr	R1				; repeat it
 	call	MusicInit
@@ -318,6 +320,7 @@ MainGame:
 	; (!) music 50Hz is a TOP PRIORITY here
 	cmp	@#177710, #360
 	blo	02$
+	return
 02$:	; babies on even frame
 	bit	#1, FrameCount
 	bne	10$
@@ -331,6 +334,29 @@ MainGame:
 
 ; game over
 MainOver:
+	call	MusicMute
+	call	FadeScreen
+	; set babies score
+	mov	SavedBabies, R0
+	mov	#MsgOverCntB, R5
+	call	SetDecimal5
+	; set cats score
+	mov	SavedCats, R0
+	mov	#MsgOverCntC, R5
+	call	SetDecimal5
+	; print game over strings
+	call	PrintSp
+	.word	100.*C_SCRWID+11.+C_VADDR
+	.word	MsgOver01
+	call	PrintSp
+	.word	120.*C_SCRWID+11.+C_VADDR
+	.word	MsgOver02
+	call	PrintSp
+	.word	131.*C_SCRWID+11.+C_VADDR
+	.word	MsgOver03
+	clr	PpuKeys
+10$:	bit	#P_KEY_FIRE, PpuKeys
+	beq	10$
 	clr	CurrentMode
 	return
 
@@ -534,7 +560,14 @@ BabyRight:
 	cmp	R0, #40.*400
 	bhi	99$
 	; it is
-	mov	#C_SND_INSIDE, R0
+	cmp	C_BABY_SPRITE(R5), #C_SPR_BABY1
+	bne	20$
+SavedBabies =: .+2
+	inc	#000000
+	br	30$
+SavedCats =: .+2
+20$:	inc	#000000
+30$:	mov	#C_SND_INSIDE, R0
 	call	PlaySound
 BabyDead =: .
 	mov	#ZZ, C_BABY_SPRITE(R5)		; 'empty' sprite
@@ -1498,6 +1531,26 @@ SetJoyKey:
 	return					; return from routine above
 
 
+; set decimal -> ascii, 5 digits
+; R0 - number, R5 - where to
+SetDecD:	.word	10000., 1000., 100., 10.
+SetDecimal5:
+	mov	#SetDecD, R4
+	mov	#4, R3
+10$:	mov	(R4)+, R1
+	mov	#'0, R2
+20$:	cmp	R0, R1
+	blt	30$
+	sub	R1, R0
+	inc	R2
+	br	20$
+30$:	movb	R2, (R5)+
+	sob	R3, 10$
+	add	#'0, R0
+	movb	R0, (R5)
+	return
+
+
 ; R0 = next byte after the source data
 ; R1 = next byte after the decompressed data
 ; registers used: all (R0-R5)
@@ -1624,6 +1677,11 @@ MsgJoy003:	.asciz	<3>"NAVMITE WPRAWO"
 MsgJoy004:	.asciz	<3>"NAVMITE WNIZ"
 MsgJoy005:	.asciz	<3>"NAVMITE WLEWO"
 MsgJoy006:	.asciz	<3>"NAVMITE OGONX"
+MsgOver01:	.asciz	<3>"ASTA LA WISTA= BEJBI"
+MsgOver02:	.ascii	<1>"SPASENO DETEJ: "<2>
+MsgOverCntB:	.asciz	"00000"
+MsgOver03:	.ascii	<1>"SPASENO KOTOW: "<2>
+MsgOverCntC:	.asciz	"00000"
 		.even
 MsgMusicTbl:	.word	MsgMusicOff, MsgMusicAy, MsgMusicMen
 
