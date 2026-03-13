@@ -271,6 +271,8 @@ MainMenu:
 	; 1 - setup joystick
 	cmp	R0, #'1
 	bne	20$
+	mov	#C_SND_DIRT, R0
+	call	PlaySoundAlways
 	call	JoySetup
 	clr	CurrentMode
 	return
@@ -278,7 +280,7 @@ MainMenu:
 	cmp	R0, #'2
 	bne	30$
 	mov	#C_SND_DIRT, R0
-	call	PlaySound
+	call	PlaySoundAlways
 	inc	MusicType
 	cmp	MusicType, #2
 	blos	22$
@@ -288,6 +290,8 @@ MainMenu:
 30$:	; 0 - exit
 	cmp	R0, #'0
 	bne	10$
+	mov	#C_SND_DIRT, R0
+	call	PlaySoundAlways
 	jmp	Exit
 90$:	; start
 	inc	CurrentMode
@@ -1601,6 +1605,7 @@ PlaySound:
 	; (!) no sounds when music is playing 
 	tst	MusicType
 	bne	99$
+PlaySoundAlways =: .
 	asl	R0
 	beq	90$
 	mov	SoundTable(R0), R0
