@@ -125,7 +125,7 @@ Start:	mov	#1000, SP
 	mov	#VsyInt, @#100
 	mov	#200, @#102
 	mov	#1200, TimerCycle
-	mov	#2, TimerLine
+	; mov	#360, TimerLine
 10$:	; keyboard interrupts
 	mov	#KbdInt, @#60
 	clr	@#62
@@ -1246,13 +1246,9 @@ UnpFont:
 	mov	R1, -(SP)
 	mov	#8., R1
 	clr	R0
-10$:	rorb	R4
-	bcs	20$
+10$:	ror	R4
 	ror	R0
-	br	30$
-20$:	ror	R0
-	sec
-30$:	ror	R0
+	asr	R0
 	sob	R1, 10$
 	mov	R0, R4
 	mov	(SP)+, R1
@@ -1270,6 +1266,8 @@ PrintSp:
 	call	Print
 	add	#4, (SP)
 	return
+
+FontData2 =: 112276;
 
 ; print string
 ; R0 - string
