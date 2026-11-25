@@ -86,11 +86,11 @@ C_KEY_RIGHT	=: 31
 C_KEY_SPACE	=: 40
 
 ; joystick default bits
-P_KEY_UP	=: 001
-P_KEY_RIGHT	=: 002
-P_KEY_DOWN	=: 004
-P_KEY_LEFT	=: 010
-P_KEY_FIRE	=: 060 				; 2 buttons 'fire' (40) and 'key A' (20)
+C_JOY_UP	=: 001
+C_JOY_RIGHT	=: 002
+C_JOY_DOWN	=: 004
+C_JOY_LEFT	=: 010
+C_JOY_FIRE	=: 060 				; 2 buttons 'fire' (40) and 'key A' (20)
 
 ; sounds
 C_SND_BOOM	=: 01
@@ -137,11 +137,8 @@ TimerCycle =: .+2
 	mov	#740, @#177706
 	mov	#20, @#177712			; start timer, max speed
 
-	; set joystick bad bits
 	clr	@#177714			; turn off mouse?
-JoyBadBits =: .+2
-	clr	#000000
-	clr	R0
+	clr	R0				; set joystick bad port bits
 	bis	@#177714, JoyBadBits
 	sob	R0, .-6
 
@@ -217,7 +214,6 @@ MainCycleTbl:	.word	MainMenuInit, MainMenu, MainInit, MainGame, MainOver
 MainMenuInit:
 	call	MusicMute
 	call	FadeScreen
-	clr	PpuKeys
 	; image
 	mov	#MenuData1, R0
 	mov	#50.*C_SCRWID+C_VADDR, R1
@@ -262,8 +258,10 @@ PrintMusicType:
 
 ; main menu
 MainMenu:
-10$:	call	KeysCheck
-	bit	#P_KEY_FIRE, PpuKeys
+	clr	JoyCur
+	clr	KeyCur
+10$:	call	Joystick
+	bit	JoyFire, JoyCur
 	bne	90$
 	mov	KeyCur, R0
 	beq	10$
@@ -289,11 +287,15 @@ MainMenu:
 	br	10$
 30$:	; 0 - exit
 	cmp	R0, #'0
-	bne	10$
+	bne	60$
 	mov	#C_SND_DIRT, R0
 	call	PlaySoundAlways
 	jmp	Exit
+60$:	; space
+	cmp	R0, #40
+	bne	10$
 90$:	; start
+	clr	JoyCur
 	inc	CurrentMode
 	return
 
@@ -331,7 +333,7 @@ MainGame:
 	call	BabyPrepare
 	jmp	BabyProcess
 10$:	; medics on odd frame
-	call	KeysCheck
+	call	Joystick
 	call	MedicsDraw
 	jmp	MedicsProcess
 
@@ -358,8 +360,9 @@ MainOver:
 	call	PrintSp
 	.word	131.*C_SCRWID+11.+C_VADDR
 	.word	MsgOver03
-	clr	PpuKeys
-10$:	bit	#P_KEY_FIRE, PpuKeys
+	clr	JoyCur
+10$:	call	Joystick
+	bit	JoyFire, JoyCur
 	beq	10$
 	clr	CurrentMode
 	return
@@ -786,15 +789,11 @@ MedicsInit:
 
 ; process medics movements
 MedicsProcess:
-	; both keys are up - clear velocities
-	mov	PpuKeys, R0
-	bit	#P_KEY_LEFT+P_KEY_RIGHT, R0
-	beq	MedVelInit
-	bit	#P_KEY_LEFT, PpuKeys
+	bit	JoyLeft, JoyCur
 	bne	MedicsLeft
-	bit	#P_KEY_RIGHT, PpuKeys
+	bit	JoyRight, JoyCur
 	bne	MedicsRight
-	return
+	; both keys are up - clear velocities
 
 ; they are stopped
 MedVelInit:
@@ -1424,47 +1423,47 @@ FrameCount:	.word	0
 	return
 
 
-; keyboard simple
+; keyboard interrupt(s)
 Kbd274:
-KbdInt:	mov	R0, -(SP)
-	mov	R1, -(SP)
-	mov	@#177662, R0
-	mov	R0, (PC)+
+KbdInt:	mov	@#177662, (PC)+
 KeyCur:	.word	0
-	mov	#KeyToPpu, R1
-10$:	cmp	R0, (R1)+
-	bne	20$
-PpuKeys =: .+2
-	bis	(R1), #000000
-	br	90$
-20$:	tst	(R1)+
-	cmp	R1, #KeyToPpuEnd
-	bne	10$
-90$:	mov	(SP)+, R1
-	mov	(SP)+, R0
 	rti
 
 
-; keyboard check
-KeysCheck:
-	; joy
-	mov	@#177714, R0			; get joy bits
-	bic	JoyBadBits, R0			; clear bad ones
-	; if we redefined joy bits - set them 
-	clr	R2				; bits from joy
-	mov	#JoyReTable, R1
-02$:	bit	R0, (R1)+
-	beq	04$
-	bis	(R1), R2
-04$:	tst	(R1)+
-	cmp	R1, #JoyReTableEnd
-	blo	02$
-	; now in R2 are bits from joy
-	bit	#100, @#177716			; any key pressed?
-	beq	10$				; yes
-	clr	PpuKeys
-10$:	bis	R2, PpuKeys
+; joystick and keyboard procedure
+Joystick:
+	; check keys change
+	mov	@#177716, R0
+	bic	#^C100, R0
+10$:	cmp	R0, #000000			; was kdb bit changed?
+	beq	100$				; no
+	mov	R0, 10$+2
+	bit	#100, R0			; check it was pressed or released
+	beq	20$				; pressed
+	; key was released
+	clr	JoyCur
 	return
+20$:	; key was pressed
+	mov	@#177662, R0			; key code
+	mov	#KeyToJoy, R1
+30$:	cmp	R0, (R1)+
+	bne	40$
+	bis	@(R1)+, JoyCur
+	return
+40$:	tst	(R1)+
+	cmp	R1, #KeyToJoyEnd
+	blo	30$
+	return
+100$:	; check joystick change
+	mov	@#177714, R0
+JoyBadBits =: .+2
+	bic	#000000, R0
+110$:	cmp	R0, #000000
+	beq	199$
+	mov	R0, 110$+2
+JoyCur =: .+2
+	mov	R0, #000000
+199$:	return
 
 
 ; clean some data from background tilemap
@@ -1479,7 +1478,7 @@ CleanTilemap:
 	return
 
 
-; setup joy redefine table
+; setup joy redefine table (if user want so, doing that only once)
 JoySetup:
 	call	FadeScreen
 	mov	#10.*C_SCRWID+2+C_VADDR, PrintVaddr
@@ -1487,10 +1486,9 @@ JoySetup:
 	call	Print
 	call	Print
 	add	#10.*C_SCRWID, PrintVaddr
-	; for double press detection
-JoyTempDD =: .+2
-	clr	#000000
-	mov	#JoyReTable, R5
+	mov	@#177714, R2			; current summ of joy bits
+	mov	R2, R3				; total summ of joy bits
+	mov	#JoyTable, R5
 	mov	#5, R4
 10$:	call	Print
 	call	SetJoyKey
@@ -1501,34 +1499,28 @@ JoyTempDD =: .+2
 ; R5 - where to put it
 ; return R5 - where to put next
 SetJoyKey:
-	mov	JoyTempDD, R2
-	; wait for press
-10$:	bit	#100, @#177716
-	beq	90$
+	clr	KeyCur
+10$:	; wait for press
+	tst	KeyCur				; check for keyboard int
+	bne	90$				; it was - restore defaults
 	mov	@#177714, R1
-	bic	JoyBadBits, R1
-	beq	10$
-	; check for double press
 	bis	R1, R2
-	cmp	JoyTempDD, R2
+	cmp	R2, R3
 	beq	10$
-	; update JoyReTable
-	mov	R1, (R5)+
+	mov	R2, R3
+	; update JoyTable
+	mov	R1, (R5)
+	bic	JoyBadBits, (R5)+
 	; wait for release
-20$:	bit	#100, @#177716
-	beq	90$
-	mov	@#177714, R1
-	bic	JoyBadBits, R1
-	bne	20$
-	mov	R2, JoyTempDD
+20$:	cmp	@#177714, R1
+	beq	20$
 	tst	(R5)+
 	return
 90$:	; restore defaults
-	mov	#JoyReTableEnd, R5
+	mov	#JoyTableEnd, R5
 	mov	#5, R3
 	mov	-(R5), -(R5)
 	sob	R3, .-2
-	clr	KeyCur
 	tst	(SP)+				; remove call
 	return					; return from routine above
 
@@ -1691,20 +1683,22 @@ MsgOverCntC:	.asciz	"00000"
 		.even
 MsgMusicTbl:	.word	MsgMusicOff, MsgMusicAy, MsgMusicMen
 
-KeyToPpu:	.word	C_KEY_LEFT,  P_KEY_LEFT
-		.word	C_KEY_RIGHT, P_KEY_RIGHT
-		.word	C_KEY_UP,    P_KEY_UP
-		.word	C_KEY_DOWN,  P_KEY_DOWN
-		.word	C_KEY_SPACE, P_KEY_FIRE
-KeyToPpuEnd:
+; joystick bits (maybe redefined)
+JoyTable:
+JoyUp:		.word	C_JOY_UP,	C_JOY_UP
+JoyRight:	.word	C_JOY_RIGHT,	C_JOY_RIGHT
+JoyDown:	.word	C_JOY_DOWN,	C_JOY_DOWN
+JoyLeft:	.word	C_JOY_LEFT,	C_JOY_LEFT
+JoyFire:	.word	C_JOY_FIRE,	C_JOY_FIRE
+JoyTableEnd:
 
-JoyReTable:	.word	P_KEY_UP,    P_KEY_UP
-JoyReTableR:	.word	P_KEY_RIGHT, P_KEY_RIGHT
-JoyReTableD:	.word	P_KEY_DOWN,  P_KEY_DOWN
-JoyReTableL:	.word	P_KEY_LEFT,  P_KEY_LEFT
-JoyReTableF:	.word	P_KEY_FIRE,  P_KEY_FIRE
-JoyReTableEnd:
-
+; keyboard -> joy bits mapping
+KeyToJoy:	.word	C_KEY_UP,    JoyUp
+		.word	C_KEY_RIGHT, JoyRight
+		.word	C_KEY_DOWN,  JoyDown
+		.word	C_KEY_LEFT,  JoyLeft
+		.word	C_KEY_SPACE, JoyFire
+KeyToJoyEnd:
 
 BabiesYTbl:	.byte	C_WINDOW_Y1-20, C_WINDOW_Y2-20, C_WINDOW_Y3-20, C_WINDOW_Y2-20
 Babies:		.blkb	C_BABY_COUNT*C_BABY_LEN
